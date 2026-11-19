@@ -8,3 +8,4 @@ export * from './lz.ts';
 export * from './blz.ts';
 export * from './writer.ts';
 export * from './platinum-save.ts';
+export * from './platinum-pokemon.ts';
