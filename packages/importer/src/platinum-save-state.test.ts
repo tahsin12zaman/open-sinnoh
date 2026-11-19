@@ -39,9 +39,13 @@ describe('Platinum combined save import', () => {
 
       const base = makeBaseState();
       const imported = importPlatinumSaveState(
-        base,
-        bytes,
-      );
+  base,
+  bytes,
+  {
+    flags: new Map(),
+    vars: new Map(),
+  },
+);
 
       console.log('combined import:', {
         player: imported.names.player,
