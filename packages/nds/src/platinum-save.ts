@@ -303,7 +303,7 @@ export function readPlatinumTrainerData(
   };
 }
 
-export const PLATINUM_FIELD_STATE_OFFSET = 0x1294;
+export const PLATINUM_FIELD_STATE_OFFSET = 0x1280;
 
 export interface PlatinumLocation {
   mapHeaderId: number;

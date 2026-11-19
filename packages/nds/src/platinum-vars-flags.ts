@@ -1,6 +1,6 @@
 import { selectPlatinumSaveBlocks } from './platinum-save.ts';
 
-export const PLATINUM_VARS_FLAGS_OFFSET = 0x0dc0;
+export const PLATINUM_VARS_FLAGS_OFFSET = 0x0dac;
 export const PLATINUM_VARS_START = 0x4000;
 export const PLATINUM_VARS_END = 0x4120;
 export const PLATINUM_VARS_COUNT =
