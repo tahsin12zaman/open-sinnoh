@@ -10,3 +10,4 @@ export * from './writer.ts';
 export * from './platinum-save.ts';
 export * from './platinum-pokemon.ts';
 export * from './platinum-pokemon-data.ts';
+export * from './platinum-vars-flags.ts';
