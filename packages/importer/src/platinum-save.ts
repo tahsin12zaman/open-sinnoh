@@ -1,8 +1,8 @@
+import type { GameState } from '@opensinnoh/contracts';
 import {
   readPlatinumTrainerData,
   type PlatinumTrainerData,
 } from '@opensinnoh/nds';
-import type { GameState } from '@opensinnoh/contracts';
 import charmapFile from '../data/charmap.json' with { type: 'json' };
 import { charTable, type CharmapFile } from './names.ts';
 
@@ -15,7 +15,9 @@ export type ImportedPlatinumTrainer = Omit<
   name: string;
 };
 
-export function decodePlatinumName(codes: readonly number[]): string {
+export function decodePlatinumName(
+  codes: readonly number[],
+): string {
   const end = codes.indexOf(0xffff);
   const characters = end < 0 ? codes : codes.slice(0, end);
 
@@ -53,7 +55,9 @@ export function importPlatinumTrainer(
   );
 }
 
-function platinumGender(gender: number): GameState['gender'] {
+function platinumGender(
+  gender: number,
+): GameState['gender'] {
   if (gender === 0) return 'male';
   if (gender === 1) return 'female';
 

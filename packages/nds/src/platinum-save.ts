@@ -40,7 +40,9 @@ export function readPlatinumSaveFooter(
     footerOffset < 0 ||
     footerOffset + PLATINUM_SAVE_FOOTER_SIZE > bytes.length
   ) {
-    throw new Error(`Platinum save footer at 0x${footerOffset.toString(16)} is outside the file`);
+    throw new Error(
+      `Platinum save footer at 0x${footerOffset.toString(16)} is outside the file`,
+    );
   }
 
   const view = new DataView(
@@ -71,8 +73,13 @@ export function validatePlatinumSaveBlock(
     throw new Error('Platinum save block is outside the file');
   }
 
-  const footerOffset = blockEnd - PLATINUM_SAVE_FOOTER_SIZE;
-  const footer = readPlatinumSaveFooter(bytes, footerOffset);
+  const footerOffset =
+    blockEnd - PLATINUM_SAVE_FOOTER_SIZE;
+
+  const footer = readPlatinumSaveFooter(
+    bytes,
+    footerOffset,
+  );
 
   if (footer.signature !== PLATINUM_SAVE_SIGNATURE) {
     throw new Error(
@@ -92,7 +99,11 @@ export function validatePlatinumSaveBlock(
     );
   }
 
-  const checksum = crc16Ccitt(bytes, blockOffset, footerOffset);
+  const checksum = crc16Ccitt(
+    bytes,
+    blockOffset,
+    footerOffset,
+  );
 
   if (checksum !== footer.checksum) {
     throw new Error(
@@ -103,7 +114,9 @@ export function validatePlatinumSaveBlock(
   return footer;
 }
 
-export function validatePlatinumSaveSize(bytes: Uint8Array): void {
+export function validatePlatinumSaveSize(
+  bytes: Uint8Array,
+): void {
   if (bytes.length !== PLATINUM_SAVE_SIZE) {
     throw new Error(
       `Platinum save is ${bytes.length} bytes, expected ${PLATINUM_SAVE_SIZE}`,
@@ -111,7 +124,10 @@ export function validatePlatinumSaveSize(bytes: Uint8Array): void {
   }
 }
 
-export const PLATINUM_SAVE_COPY_OFFSETS = [0x00000, 0x40000] as const;
+export const PLATINUM_SAVE_COPY_OFFSETS = [
+  0x00000,
+  0x40000,
+] as const;
 
 export const PLATINUM_GENERAL_BLOCK = {
   offset: 0,
@@ -135,8 +151,12 @@ export interface PlatinumSaveBlocks {
   storage: PlatinumSaveBlock;
 }
 
-function counterIsNewer(candidate: number, current: number): boolean {
+function counterIsNewer(
+  candidate: number,
+  current: number,
+): boolean {
   const difference = (candidate - current) >>> 0;
+
   return difference !== 0 && difference < 0x80000000;
 }
 
@@ -144,7 +164,10 @@ function blockIsNewer(
   candidate: PlatinumSaveBlock,
   current: PlatinumSaveBlock,
 ): boolean {
-  if (candidate.footer.saveCounter !== current.footer.saveCounter) {
+  if (
+    candidate.footer.saveCounter !==
+    current.footer.saveCounter
+  ) {
     return counterIsNewer(
       candidate.footer.saveCounter,
       current.footer.saveCounter,
@@ -157,14 +180,18 @@ function blockIsNewer(
   );
 }
 
-function newestBlock(blocks: PlatinumSaveBlock[]): PlatinumSaveBlock {
+function newestBlock(
+  blocks: PlatinumSaveBlock[],
+): PlatinumSaveBlock {
   if (blocks.length === 0) {
     throw new Error('No valid Platinum save block copies');
   }
 
   return blocks.slice(1).reduce(
     (current, candidate) =>
-      blockIsNewer(candidate, current) ? candidate : current,
+      blockIsNewer(candidate, current)
+        ? candidate
+        : current,
     blocks[0]!,
   );
 }
@@ -213,7 +240,10 @@ export function selectPlatinumSaveBlocks(
     validBlockCopies(bytes, PLATINUM_STORAGE_BLOCK),
   );
 
-  if (general.footer.saveCounter !== storage.footer.saveCounter) {
+  if (
+    general.footer.saveCounter !==
+    storage.footer.saveCounter
+  ) {
     throw new Error(
       `Platinum general/storage save counters disagree: ${general.footer.saveCounter} and ${storage.footer.saveCounter}`,
     );
@@ -251,7 +281,8 @@ export function readPlatinumTrainerData(
 
   const nameCodes = Array.from(
     { length: 8 },
-    (_, index) => view.getUint16(base + 0x68 + index * 2, true),
+    (_, index) =>
+      view.getUint16(base + 0x68 + index * 2, true),
   );
 
   const combinedId = view.getUint32(base + 0x78, true);
@@ -270,4 +301,53 @@ export function readPlatinumTrainerData(
       seconds: view.getUint8(base + 0x8d),
     },
   };
+}
+
+export const PLATINUM_FIELD_STATE_OFFSET = 0x1294;
+
+export interface PlatinumLocation {
+  mapHeaderId: number;
+  warpId: number;
+  x: number;
+  z: number;
+  faceDirection: number;
+}
+
+export function readPlatinumPlayerLocation(
+  bytes: Uint8Array,
+): PlatinumLocation {
+  const { general } = selectPlatinumSaveBlocks(bytes);
+  const offset =
+    general.offset + PLATINUM_FIELD_STATE_OFFSET;
+
+  const view = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  );
+
+  const location: PlatinumLocation = {
+    mapHeaderId: view.getInt32(offset, true),
+    warpId: view.getInt32(offset + 4, true),
+    x: view.getInt32(offset + 8, true),
+    z: view.getInt32(offset + 12, true),
+    faceDirection: view.getInt32(offset + 16, true),
+  };
+
+  if (location.mapHeaderId < 0) {
+    throw new Error(
+      `Invalid Platinum map header ${location.mapHeaderId}`,
+    );
+  }
+
+  if (
+    location.faceDirection < 0 ||
+    location.faceDirection > 3
+  ) {
+    throw new Error(
+      `Invalid Platinum facing direction ${location.faceDirection}`,
+    );
+  }
+
+  return location;
 }
