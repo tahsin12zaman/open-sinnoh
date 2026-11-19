@@ -221,3 +221,53 @@ export function selectPlatinumSaveBlocks(
 
   return { general, storage };
 }
+
+export interface PlatinumTrainerData {
+  nameCodes: number[];
+  trainerId: number;
+  secretId: number;
+  money: number;
+  gender: number;
+  badges: number;
+  coins: number;
+  playTime: {
+    hours: number;
+    minutes: number;
+    seconds: number;
+  };
+}
+
+export function readPlatinumTrainerData(
+  bytes: Uint8Array,
+): PlatinumTrainerData {
+  const { general } = selectPlatinumSaveBlocks(bytes);
+  const base = general.offset;
+
+  const view = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  );
+
+  const nameCodes = Array.from(
+    { length: 8 },
+    (_, index) => view.getUint16(base + 0x68 + index * 2, true),
+  );
+
+  const combinedId = view.getUint32(base + 0x78, true);
+
+  return {
+    nameCodes,
+    trainerId: combinedId & 0xffff,
+    secretId: combinedId >>> 16,
+    money: view.getUint32(base + 0x7c, true),
+    gender: view.getUint8(base + 0x80),
+    badges: view.getUint8(base + 0x82),
+    coins: view.getUint16(base + 0x88, true),
+    playTime: {
+      hours: view.getUint16(base + 0x8a, true),
+      minutes: view.getUint8(base + 0x8c),
+      seconds: view.getUint8(base + 0x8d),
+    },
+  };
+}

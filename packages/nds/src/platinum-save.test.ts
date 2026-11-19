@@ -13,6 +13,7 @@ import {
   selectPlatinumSaveBlocks,
   validatePlatinumSaveBlock,
   validatePlatinumSaveSize,
+  readPlatinumTrainerData,
 } from './platinum-save.ts';
 
 function makeBlock(
@@ -66,6 +67,29 @@ function writeBlock(
     copyOffset + specification.offset,
   );
 }
+
+function refreshBlockChecksum(
+  save: Uint8Array,
+  blockOffset: number,
+  blockSize: number,
+): void {
+  const footerOffset =
+    blockOffset + blockSize - PLATINUM_SAVE_FOOTER_SIZE;
+
+  const view = new DataView(
+    save.buffer,
+    save.byteOffset,
+    save.byteLength,
+  );
+
+  view.setUint16(
+    footerOffset + 18,
+    crc16Ccitt(save, blockOffset, footerOffset),
+    true,
+  );
+}
+  
+
 
 describe('Platinum save blocks', () => {
   it('reads and validates a block footer', () => {
@@ -155,6 +179,8 @@ it.skipIf(!process.env.OPENSINNOH_NDS_SAV)(
     const path = process.env.OPENSINNOH_NDS_SAV!;
     const bytes = new Uint8Array(readFileSync(path));
     const selected = selectPlatinumSaveBlocks(bytes);
+    const trainer = readPlatinumTrainerData(bytes);
+    console.log('trainer data:', trainer);
 
     expect(selected.general.footer.signature).toBe(
       PLATINUM_SAVE_SIGNATURE,
@@ -171,4 +197,62 @@ it.skipIf(!process.env.OPENSINNOH_NDS_SAV)(
     );
   },
 );
+
+it('reads trainer data from the selected general block', () => {
+  const save = new Uint8Array(PLATINUM_SAVE_SIZE);
+  const [primary, backup] = PLATINUM_SAVE_COPY_OFFSETS;
+
+  writeBlock(save, primary, PLATINUM_GENERAL_BLOCK, 12, 1);
+  writeBlock(save, backup, PLATINUM_GENERAL_BLOCK, 12, 2);
+  writeBlock(save, primary, PLATINUM_STORAGE_BLOCK, 12, 1);
+  writeBlock(save, backup, PLATINUM_STORAGE_BLOCK, 12, 2);
+
+  const base = backup + PLATINUM_GENERAL_BLOCK.offset;
+  const view = new DataView(save.buffer);
+
+  const nameCodes = [
+    0x012b,
+    0x0136,
+    0x012a,
+    0x0132,
+    0xFFFF,
+    0xFFFF,
+    0xFFFF,
+    0xFFFF,
+  ];
+
+  nameCodes.forEach((code, index) => {
+    view.setUint16(base + 0x68 + index * 2, code, true);
+  });
+
+  view.setUint32(base + 0x78, (54321 << 16) | 12345, true);
+  view.setUint32(base + 0x7c, 987654, true);
+  view.setUint8(base + 0x80, 1);
+  view.setUint8(base + 0x82, 0b10101101);
+  view.setUint16(base + 0x88, 4321, true);
+  view.setUint16(base + 0x8a, 127, true);
+  view.setUint8(base + 0x8c, 34);
+  view.setUint8(base + 0x8d, 56);
+
+refreshBlockChecksum(
+    save,
+    base,
+    PLATINUM_GENERAL_BLOCK.size,
+  );
+
+  expect(readPlatinumTrainerData(save)).toEqual({
+    nameCodes,
+    trainerId: 12345,
+    secretId: 54321,
+    money: 987654,
+    gender: 1,
+    badges: 0b10101101,
+    coins: 4321,
+    playTime: {
+      hours: 127,
+      minutes: 34,
+      seconds: 56,
+    },
+  });
+});
 });
