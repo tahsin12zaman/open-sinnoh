@@ -14,4 +14,5 @@ export * from './ui2d/index.ts';
 export * from './pokedex.ts';
 export * from './distortion/index.ts';
 export * from './hgss/followers.ts';
+export * from './platinum-save.ts';
 export { objectiveTexts } from './objectives.ts';
