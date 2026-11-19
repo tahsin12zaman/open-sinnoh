@@ -1,4 +1,8 @@
-import { readPlatinumTrainerData, type PlatinumTrainerData } from '@opensinnoh/nds';
+import {
+  readPlatinumTrainerData,
+  type PlatinumTrainerData,
+} from '@opensinnoh/nds';
+import type { GameState } from '@opensinnoh/contracts';
 import charmapFile from '../data/charmap.json' with { type: 'json' };
 import { charTable, type CharmapFile } from './names.ts';
 
@@ -46,5 +50,47 @@ export function importPlatinumTrainer(
 ): ImportedPlatinumTrainer {
   return convertPlatinumTrainerData(
     readPlatinumTrainerData(save),
+  );
+}
+
+function platinumGender(gender: number): GameState['gender'] {
+  if (gender === 0) return 'male';
+  if (gender === 1) return 'female';
+
+  throw new Error(`Unknown Platinum trainer gender ${gender}`);
+}
+
+export function applyPlatinumTrainer(
+  state: GameState,
+  trainer: ImportedPlatinumTrainer,
+): GameState {
+  const combinedTrainerId =
+    (((trainer.secretId & 0xffff) << 16) |
+      (trainer.trainerId & 0xffff)) >>>
+    0;
+
+  return {
+    ...state,
+    names: {
+      ...state.names,
+      player: trainer.name,
+    },
+    gender: platinumGender(trainer.gender),
+    trainerId: combinedTrainerId,
+    money: trainer.money,
+    coins: trainer.coins,
+    playTime: {
+      ...trainer.playTime,
+    },
+  };
+}
+
+export function applyPlatinumSave(
+  state: GameState,
+  save: Uint8Array,
+): GameState {
+  return applyPlatinumTrainer(
+    state,
+    importPlatinumTrainer(save),
   );
 }

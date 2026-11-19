@@ -1,7 +1,10 @@
+import type { GameState } from '@opensinnoh/contracts';
 import { describe, expect, it } from 'vitest';
 import {
+  applyPlatinumTrainer,
   convertPlatinumTrainerData,
   decodePlatinumName,
+  type ImportedPlatinumTrainer,
 } from './platinum-save.ts';
 
 const TEST_NAME_CODES = [
@@ -14,6 +17,39 @@ const TEST_NAME_CODES = [
   0,
   0,
 ];
+
+const TEST_TRAINER: ImportedPlatinumTrainer = {
+  name: 'Test',
+  trainerId: 12345,
+  secretId: 54321,
+  money: 123456,
+  gender: 1,
+  badges: 3,
+  coins: 250,
+  playTime: {
+    hours: 10,
+    minutes: 20,
+    seconds: 30,
+  },
+};
+
+function makeBaseState(): GameState {
+  return {
+    names: {
+      player: 'Player',
+      rival: 'Rival',
+    },
+    gender: 'male',
+    trainerId: 1,
+    money: 3000,
+    coins: 0,
+    playTime: {
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+    },
+  } as GameState;
+}
 
 describe('Platinum save import', () => {
   it('decodes a native trainer name', () => {
@@ -36,13 +72,21 @@ describe('Platinum save import', () => {
           seconds: 30,
         },
       }),
-    ).toEqual({
-      name: 'Test',
-      trainerId: 12345,
-      secretId: 54321,
+    ).toEqual(TEST_TRAINER);
+  });
+
+  it('applies trainer data to an OpenSinnoh state', () => {
+    const base = makeBaseState();
+    const converted = applyPlatinumTrainer(base, TEST_TRAINER);
+
+    expect(converted).toMatchObject({
+      names: {
+        player: 'Test',
+        rival: 'Rival',
+      },
+      gender: 'female',
+      trainerId: ((54321 << 16) | 12345) >>> 0,
       money: 123456,
-      gender: 1,
-      badges: 3,
       coins: 250,
       playTime: {
         hours: 10,
@@ -50,5 +94,17 @@ describe('Platinum save import', () => {
         seconds: 30,
       },
     });
+
+    expect(base.names.player).toBe('Player');
+    expect(base.money).toBe(3000);
+  });
+
+  it('rejects an unknown native gender value', () => {
+    expect(() =>
+      applyPlatinumTrainer(makeBaseState(), {
+        ...TEST_TRAINER,
+        gender: 2,
+      }),
+    ).toThrow(/gender 2/i);
   });
 });
