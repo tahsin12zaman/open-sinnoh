@@ -1,0 +1,33 @@
+/* The Underground's windows over the field (ui/underground.ts), on the mart's board. */
+.ug-board .window.rom-frame { padding: 0; }
+.ug-board .menu-entry { padding-left: calc(var(--dot) * 10); }
+.ug-list-window { display: grid; }
+.ug-board .ug-list { padding: 0; background: none; box-shadow: none; overflow: hidden; }
+.ug-board .item-row { padding: 0 calc(var(--dot) * 4) 0 calc(var(--dot) * 8); gap: calc(var(--dot) * 2); }
+.ug-board .item-row + .item-row { border-top: 0; }
+.ug-board .price { margin-left: auto; }
+.ug-description { display: grid; pointer-events: none; }
+.ug-description-box { white-space: pre-line; }
+.ug-price { display: grid; grid-template-rows: 1fr 1fr; align-items: center; }
+.ug-price-value { justify-self: end; }
+.ug-heading { white-space: pre-line; }
+.ug-records-window { display: grid; }
+.ug-records { display: grid; align-content: start; gap: calc(var(--dot) * 2); padding: 0; background: none; text-align: left; }
+.ug-record { display: flex; justify-content: space-between; }
+.ug-record-title { margin-bottom: calc(var(--dot) * 4); }
+/* The mining board: the side buttons are hit boxes over the canvas's drawn buttons. */
+.ug-mining-scene .ug-tool { position: absolute; background: none; border: 0; padding: 0; }
+.ug-mining-scene .ug-tool.is-cursor { outline: none; background: none; box-shadow: none; }
+.ug-mining-scene .ug-tool.is-cursor::before { display: none; }
+.ug-mining-scene .ds-scene-canvas { touch-action: none; }
+/* The secret base's PC: the floor under the board takes the decoration's touches; the fades cover the board. */
+.ug-pc .ug-floor-touch { position: fixed; inset: var(--room-top, 0px) var(--room-right, 0px) var(--room-bottom, 0px) var(--room-left, 0px); pointer-events: auto; touch-action: none; }
+.ug-pc .ug-fade { background: #000; pointer-events: none; }
+/* A trap's screen: the canvas over the field, the flash (white) or the dimming (black) over the field behind it. */
+.ug-trap { pointer-events: none; }
+.ug-trap .ug-trap-canvas { pointer-events: auto; touch-action: none; image-rendering: pixelated; }
+/* The DS dims the whole field: the cover fills the room (the field's part of the view), not just the board. */
+.ug-trap.is-bright::before, .ug-trap.is-dim::before { content: ''; position: fixed; inset: var(--room-top, 0px) var(--room-right, 0px) var(--room-bottom, 0px) var(--room-left, 0px); pointer-events: none; }
+.ug-trap.is-bright::before { background: #fff; opacity: var(--ug-brightness); }
+.ug-trap.is-dim::before { background: #000; opacity: calc(var(--ug-brightness) * -1); }
+.ug-trap .ug-trap-boxes { position: absolute; inset: 0; pointer-events: none; }

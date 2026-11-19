@@ -1,0 +1,262 @@
+/*
+ * The Modern menus (modern.ts): OpenSinnoh UI windows over the field, in a `.ui-frame.ui-os`. The root fills the room;
+ * the field also covers what is outside it (the scrim), so the screen is one full-bleed composition.
+ */
+.ui-screen.mm { position: absolute; inset: 0; container: os-screen / size; background-color: var(--os-field); box-shadow: none; clip-path: none; pointer-events: auto; overflow: hidden; }
+.ui-scrim:has(+ .ui-os > .mm) { background: var(--os-field); }
+.ui-os.ui-enter .mm-win { animation: os-win-in calc(var(--os-f) * 4) steps(4) both; }
+
+/* The game layer's cursor band and hover are not ours. */
+.mm [data-nav].is-cursor { background: none; box-shadow: none; }
+.mm [data-nav].is-cursor::before { display: none; }
+.mm [data-nav]:hover:not(.is-cursor) { background: none; }
+.mm .os-item.is-cursor, .mm .os-item.is-selected { background: var(--os-sel); box-shadow: inset 0 0 0 2px var(--os-sel-line); }
+.mm .os-item.is-selected > .cur { visibility: visible; }
+
+.mm-win { --w: min(1120px, calc(100% - 24px)); --h: min(720px, calc(100% - 40px)); grid-template-rows: auto minmax(0, 1fr) auto; }
+.mm-body { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 6fr); min-height: 0; }
+.mm-left { display: grid; min-height: 0; min-width: 0; padding-right: 8px; }
+.mm-right { display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; padding: 8px 4px 8px 12px; border-left: 2px solid var(--os-line); overflow: auto; scrollbar-width: none; }
+.mm-list { overflow: auto; overscroll-behavior: contain; scrollbar-width: none; touch-action: pan-y; min-height: 0; padding: 4px 0; }
+.mm-list::-webkit-scrollbar, .mm-right::-webkit-scrollbar { display: none; }
+.mm .os-foot { padding-top: 4px; }
+
+.mm .lab { font: 500 20px/24px var(--os-font-px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.mm-win .lab { text-shadow: var(--os-tsd); }
+.mm-nl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mm-wrap { flex-wrap: wrap; }
+.mm-st { display: grid; gap: 4px; min-width: 0; }
+.mm-lv { color: var(--os-muted); white-space: nowrap; }
+.mm-status { display: inline-flex; flex: none; }
+.mm-status canvas { image-rendering: pixelated; }
+.mm-held, .mm-reg { color: var(--os-muted); display: inline-flex; }
+.mm-note { color: var(--os-accent); font: 500 20px/24px var(--os-font-px); }
+.mm-prompt-line, .mm-empty { color: var(--os-muted); }
+.mm-empty { padding: 12px 16px; }
+.mm-desc { color: var(--os-ink); }
+.mm-heldname { display: inline-flex; align-items: center; gap: 4px; color: var(--os-muted); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.mm-heldname .item-icon { width: 32px; height: 32px; background-size: 32px 32px; margin: -8px -4px; }
+
+/* The ROM's icons at whole scales: a party icon (32 × 32, two frames) at 2, an item icon at 1 and 2. */
+.mm .mon-icon-box { width: 64px; height: 64px; margin: -8px -4px; }
+.mm .mon-icon-sprite { width: 64px; height: 64px; background-size: 64px 128px; }
+.mm .os-item .item-icon { width: 32px; height: 32px; background-size: 32px 32px; }
+.mm .mm-itemhero .item-icon { width: 64px; height: 64px; background-size: 64px 64px; }
+
+.mm-slot { grid-template-columns: 24px 56px minmax(0, 1fr); min-height: 56px; }
+.mm-slot-empty { min-height: 56px; margin: 4px 0 4px 32px; box-shadow: inset 0 0 0 2px var(--os-line); opacity: .5; }
+.mm-party-list { align-content: start; }
+.is-moving { outline: 2px dashed var(--os-accent); outline-offset: -4px; }
+.mm-bagrow { grid-template-columns: 24px 32px minmax(0, 1fr) auto auto; min-height: 40px; padding-block: 2px; }
+.mm-action { grid-template-columns: 24px minmax(0, 1fr) auto; min-height: 36px; padding-block: 0; }
+
+.mm-hero { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.mm-pic { display: block; flex: none; }
+.mm-pic canvas { display: block; }
+.mm-id { display: grid; gap: 8px; min-width: 0; flex: 1 1 140px; }
+.mm-actions { padding-top: 8px; border-top: 2px solid var(--os-line); overflow: auto; flex: none; }
+.mm-right:has(.mm-actions) .mm-pic canvas { width: 80px !important; height: 80px !important; }
+
+.mm-bag .mm-left { grid-template-columns: 152px minmax(0, 1fr); gap: 8px; }
+.mm-bag .mm-body { grid-template-columns: minmax(0, 11fr) minmax(0, 5fr); }
+
+.mm-msglayer { place-items: end center; }
+.mm-msg { width: min(100%, 520px); min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 8px; text-align: left; padding: 4px 8px; font: 500 20px/24px var(--os-font-px); }
+.mm .mm-msg.is-cursor { outline: none; }
+.mm-msgtext { display: inline-block; }
+.mm-next { color: var(--os-accent); flex: none; }
+.mm-sheet { display: grid; grid-template-rows: none; padding: 8px 8px calc(12px + var(--sab)); overflow: auto; }
+.mm-qty { display: flex; justify-content: center; gap: 4px; padding: 4px 8px 8px; }
+
+@container os-screen (min-width: 1000px) {
+  .mm-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mm-bag .mm-left { grid-template-columns: 216px minmax(0, 1fr); }
+}
+/* Phone: full bleed (the kit drops the frame), a list over a docked detail. */
+@container os-screen (max-width: 480px) {
+  .mm-win { --w: 100%; --h: 100%; }
+  .mm-body, .mm-bag .mm-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .mm-left { padding: 0 8px; }
+  .mm-right { border-left: 0; border-top: 2px solid var(--os-line); padding: 8px 12px; min-height: 96px; max-height: 148px; gap: 4px; }
+  .mm-slot { min-height: 72px; }
+  .mm-bagrow { min-height: 52px; }
+  .mm-hero .os-hpl { display: none; }
+  .mm-bag .mm-left { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .mm-itemhero { flex-wrap: nowrap; }
+  .mm .mm-itemhero .item-icon { width: 32px; height: 32px; background-size: 32px 32px; }
+  .mm .os-foot { padding: 8px 12px calc(12px + var(--sab)); }
+  .mm .os-tab { padding-top: calc(8px + var(--sat)); }
+  .mm-action { min-height: 52px; }
+}
+/* A phone on its side: Back on the title line, no room to lose. */
+@container os-screen (max-height: 400px) {
+  .mm-win { --h: calc(100% - 36px); --w: calc(100% - 16px); top: 30px; }
+  .mm .os-foot { position: absolute; right: 8px; top: -40px; padding: 0; z-index: 3; }
+  .mm .os-foot .fill { display: none; }
+  .mm .os-foot .os-btn { min-height: 44px; padding: 0 12px; }
+  .mm-right { padding-top: 16px; }
+  .mm-party-list { padding-top: 12px; }
+  .mm-slot { grid-template-columns: 24px 32px minmax(0, 1fr); min-height: 44px; }
+  .mm .mm-slot .mon-icon-box { width: 32px; height: 32px; margin: 0; }
+  .mm .mm-slot .mon-icon-sprite { width: 32px; height: 32px; background-size: 32px 64px; }
+  .mm-st { gap: 0; }
+  .mm-slot .mm-lv { display: none; }
+  .mm-bagrow { min-height: 44px; }
+  .mm-bag .mm-left { grid-template-columns: 44px minmax(0, 1fr); }
+  .mm .os-rail [role="tab"] { justify-content: center; padding: 0; }
+  .mm .os-rail [role="tab"] .rl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .mm-right .mm-pic canvas { width: 80px !important; height: 80px !important; }
+}
+
+/* The summary: the Pokémon on the left, the page under its pager on the right. */
+.mm-sum .mm-body { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+.mm-sum .mm-left { align-content: start; padding: 8px 12px 8px 4px; overflow: auto; scrollbar-width: none; }
+.mm-sumhero { flex-direction: column; align-items: stretch; gap: 8px; }
+.mm-picrow { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.mm-sumhero .mm-id { flex: none; }
+.mm-monsteps { display: grid; gap: 4px; }
+.mm-ball { display: inline-flex; flex: none; }
+.mm-type { display: inline-flex; flex: none; }
+.mm-type canvas { display: block; }
+.mm .mm-type.os-chip { --c: var(--os-face-alt); --t: var(--os-ink); }
+.mm-sum .mm-right { gap: 8px; overflow: hidden; }
+.mm-pager { display: flex; align-items: center; gap: 8px; min-width: 0; flex: none; }
+.mm-sum .mm-right > .mm-prompt-line { flex: none; margin: 0; }
+.mm :is(.mm-pagestep, .mm-monsteps .os-btn) { width: 44px; min-height: 44px; }
+.mm-pagetitle { margin: 0; flex: 1 1 auto; min-width: 0; font: 500 20px/24px var(--os-font-px); color: var(--os-accent); text-shadow: var(--os-tsd); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-pager .mm-pagestep:first-child + .mm-pagetitle { text-align: center; }
+.mm-pagecount { color: var(--os-muted); }
+.mm-page { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; padding: 4px 4px 8px; }
+.mm-page::-webkit-scrollbar, .mm-sum .mm-left::-webkit-scrollbar { display: none; }
+.mm .mm-page:focus-visible { outline: none; }
+.mm-pagebtn { align-self: start; }
+
+.mm-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; align-items: center; }
+.mm-kv dt { display: inline-flex; align-items: center; gap: 4px; color: var(--os-muted); font: 500 20px/24px var(--os-font-px); }
+.mm-kv dd { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; font: 500 20px/24px var(--os-font-px); overflow-wrap: anywhere; }
+.mm-stats { max-width: 480px; }
+.mm-stats dd { justify-content: end; }
+.mm-stats dd .os-hpl { flex: 1 1 auto; justify-content: end; }
+.mm-nature { display: inline-flex; color: var(--os-accent); }
+.mm-nature.down { color: var(--os-muted); }
+.mm-exp { flex: none; display: block; height: 8px; margin: 2px; background: var(--os-bg); box-shadow: 0 0 0 2px var(--os-edge); }
+.mm-exp i { display: block; height: 100%; background: var(--os-accent); }
+
+.mm-cond { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.mm-graph { width: 176px; height: 176px; flex: none; }
+.mm-graph .rim { fill: var(--os-bg); stroke: var(--os-edge); stroke-width: 2; }
+.mm-graph .mid { fill: none; stroke: var(--os-line); stroke-width: 2; }
+.mm-graph .value { fill: var(--os-accent); fill-opacity: .5; stroke: var(--os-accent); stroke-width: 2; stroke-linejoin: round; }
+.mm-cond .mm-kv { flex: 1 1 160px; }
+.mm-sheen { display: inline-flex; gap: 2px; }
+.mm-sheen i { width: 8px; height: 8px; box-shadow: inset 0 0 0 2px var(--os-edge); }
+.mm-sheen i.on { background: var(--os-accent); box-shadow: none; }
+
+.mm-moves { gap: 4px; }
+.mm-move { grid-template-columns: 24px minmax(0, 1fr) auto minmax(76px, auto); min-height: 44px; }
+.mm-move .mm-pp { justify-self: end; color: var(--os-muted); }
+.mm-move.is-new .lab { color: var(--os-accent); }
+.mm-move-empty { display: grid; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; color: var(--os-ink-off); }
+.mm-move-empty .lab { text-shadow: none; }
+.mm-movedetail { display: grid; gap: 8px; padding-top: 8px; border-top: 2px solid var(--os-line); }
+
+.mm-ribbons { display: grid; grid-template-columns: repeat(var(--per-row), max-content); gap: 4px; }
+.mm-ribbon { display: grid; place-items: center; min-width: 72px; min-height: 72px; padding: 4px; border: 0; background: none; color: var(--os-ink); cursor: pointer; }
+.mm .mm-ribbon.is-cursor { background: var(--os-sel); box-shadow: inset 0 0 0 2px var(--os-sel-line); }
+.mm-ribbon canvas { display: block; image-rendering: pixelated; }
+
+@container os-screen (max-width: 480px) {
+  .mm-sum .mm-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .mm-sum .mm-left { padding: 8px 12px 0; overflow: visible; }
+  .mm-sum .mm-right { border-top: 2px solid var(--os-line); max-height: none; min-height: 0; padding: 8px 12px; }
+  .mm-sumhero { flex-direction: row; align-items: center; gap: 12px; }
+  .mm-picrow { display: contents; }
+  .mm-sumhero .mm-id { flex: 1 1 auto; gap: 4px; }
+  .mm-monsteps { order: 2; }
+  .mm-ribbon { min-width: 48px; min-height: 48px; }
+  .mm-graph { width: 136px; height: 136px; }
+}
+@container os-screen (max-height: 400px) {
+  .mm-sum .mm-left { padding-top: 16px; }
+}
+
+/* The PC: the box (its name between arrows, the 6 × 5 grid, the party beside it) and the preview. */
+.mm-pc .mm-left { grid-template-rows: auto minmax(0, 1fr); align-content: start; gap: 8px; padding: 8px 12px 8px 4px; }
+.mm-boxhead { display: flex; align-items: center; gap: 8px; }
+.mm .mm-boxstep { width: 44px; min-height: 44px; }
+.mm-boxname { flex: 1 1 auto; min-width: 0; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 12px; border: 0; background: none; color: var(--os-ink); font: 500 20px/24px var(--os-font-px); text-shadow: var(--os-tsd); cursor: pointer; }
+.mm .mm-boxname.is-cursor { background: var(--os-sel); box-shadow: inset 0 0 0 2px var(--os-sel-line); color: var(--os-accent); }
+.mm-boxcount { color: var(--os-muted); text-shadow: none; }
+.mm-boxarea { display: grid; grid-template-columns: minmax(0, 6fr); gap: 12px; align-content: start; min-height: 0; }
+.mm-boxarea.with-party { grid-template-columns: minmax(0, 6fr) minmax(0, 1fr); }
+.mm-box { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; align-content: start; }
+.mm-boxparty { display: grid; grid-template-rows: repeat(6, auto); gap: 4px; align-content: start; padding-left: 12px; border-left: 2px solid var(--os-line); }
+.mm-cell { position: relative; display: grid; place-items: center; aspect-ratio: 1; min-height: 44px; padding: 0; border: 0; background: var(--os-face-alt); color: var(--os-ink); cursor: pointer; }
+.mm .mm-cell.is-cursor { background: var(--os-sel); box-shadow: inset 0 0 0 2px var(--os-sel-line); }
+.mm-box, .mm-boxparty { min-width: 0; }
+/* The ROM's icons (32 × 32, their Pokémon about half of it) at a whole scale that fills about 70 % of the cell. */
+.mm .mm-cell .mon-icon-box { width: 96px; height: 96px; margin: -16px; pointer-events: none; }
+.mm .mm-cell .mon-icon-sprite { width: 96px; height: 96px; background-size: 96px 192px; }
+.mm-cell .mm-held { z-index: 1; }
+/* The preview's labels: the game's words from two banks (NATURE, Item), in one case. */
+.mm-pc .mm-kv dt { text-transform: uppercase; }
+.mm-cell .mm-held { position: absolute; right: 2px; bottom: 2px; }
+.mm-hand { position: absolute; left: 50%; top: -12px; translate: -50% 0; z-index: 2; pointer-events: none; filter: drop-shadow(0 4px 0 var(--os-shadow)); }
+.mm-species { color: var(--os-muted); font: 500 20px/24px var(--os-font-px); }
+.mm-marks { display: inline-flex; gap: 4px; align-items: center; }
+.mm-marks canvas, .mm-markrow canvas { display: block; image-rendering: pixelated; }
+.mm-markcss { width: 16px; height: 16px; box-shadow: inset 0 0 0 2px var(--os-edge); }
+.mm-markcss.on { background: var(--os-accent); box-shadow: none; }
+.mm-markrow { grid-template-columns: 24px auto minmax(0, 1fr); }
+.mm-compare { border-collapse: collapse; width: 100%; font: 500 20px/24px var(--os-font-px); }
+.mm-compare :is(th, td) { padding: 4px; text-align: center; }
+.mm-compare tr > th:nth-child(2) { color: var(--os-muted); font-weight: 500; }
+.mm-compare th.is-live { color: var(--os-accent); }
+.mm-compare th .mm-nl { justify-content: center; }
+.mm-comparebox { display: grid; gap: 12px; }
+.mm-comparebox .mm-nl { justify-content: space-between; }
+
+@container os-screen (max-width: 480px) {
+  .mm-pc .mm-left { padding: 8px 8px 0; }
+  .mm-boxarea.with-party { grid-template-columns: minmax(0, 6fr) minmax(44px, 1fr); gap: 4px; }
+  .mm-boxparty { padding-left: 4px; }
+  .mm-box { gap: 2px; }
+  .mm .mm-cell .mon-icon-box { width: 64px; height: 64px; margin: -8px; }
+  .mm .mm-cell .mon-icon-sprite { width: 64px; height: 64px; background-size: 64px 128px; }
+  .mm-pc .mm-body { grid-template-rows: auto minmax(0, 1fr); }
+  .mm-pc .mm-right { max-height: none; }
+}
+
+/* The Pokédex: the list beside the species under its cursor; an entry as the summary (.mm-sum); the search's rows. */
+.mm-dexlist { scroll-behavior: auto; }
+.mm-dexrow { grid-template-columns: 24px 56px minmax(0, 1fr) auto; min-height: 40px; padding-block: 2px; }
+.mm-dexno { color: var(--os-muted); }
+.mm .lab.off { color: var(--os-ink-off); text-shadow: none; }
+.mm-caught { display: inline-flex; flex: none; }
+.mm-caught canvas { display: block; image-rendering: pixelated; }
+.mm-dexopen { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
+.mm-count { color: var(--os-on-tone); }
+.mm-dex .os-foot { gap: 8px; flex-wrap: wrap; }
+.mm-foot { display: inline-flex; flex: none; }
+.mm-foot canvas { width: 32px; height: 32px; image-rendering: pixelated; }
+.mm-dexboard { display: grid; place-items: center; min-width: 0; overflow: hidden; }
+.mm-forms { gap: 4px; }
+.mm-search { gap: 4px; align-content: start; overflow: auto; scrollbar-width: none; }
+.mm-searchrow { grid-template-columns: 24px minmax(0, 1fr) auto; min-height: 48px; cursor: default; }
+.mm-searchvalue { display: flex; align-items: center; gap: 4px; }
+.mm-searchchoice { display: inline-flex; justify-content: center; width: 168px; min-width: 0; }
+.mm-searchchoice .lab { max-width: 100%; }
+.mm-shape canvas { display: block; image-rendering: pixelated; }
+.mm .mm-searchrow:focus-visible { outline: none; }
+
+@container os-screen (max-width: 480px) {
+  .mm-dexrow { min-height: 48px; }
+  .mm-dex-list .mm-right { max-height: 112px; }
+  .mm-dex-list .mm-sumhero { flex-direction: row; align-items: center; }
+  .mm-dex-list .mm-picrow { display: contents; }
+  .mm-dex .os-foot .os-btn { padding: 0 8px; }
+  .mm-dex-search .mm-body { grid-template-rows: minmax(0, 1fr) auto; }
+  .mm-searchrow { padding-right: 4px; gap: 4px; }
+  .mm-searchchoice { width: 128px; }
+  .mm-searchchoice .lab { font-size: 16px; }
+}
