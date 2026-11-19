@@ -110,3 +110,114 @@ export function validatePlatinumSaveSize(bytes: Uint8Array): void {
     );
   }
 }
+
+export const PLATINUM_SAVE_COPY_OFFSETS = [0x00000, 0x40000] as const;
+
+export const PLATINUM_GENERAL_BLOCK = {
+  offset: 0,
+  size: 0xcf2c,
+  blockId: 0,
+} as const;
+
+export const PLATINUM_STORAGE_BLOCK = {
+  offset: 0xcf2c,
+  size: 0x121e4,
+  blockId: 1,
+} as const;
+
+export interface PlatinumSaveBlock {
+  offset: number;
+  footer: PlatinumSaveFooter;
+}
+
+export interface PlatinumSaveBlocks {
+  general: PlatinumSaveBlock;
+  storage: PlatinumSaveBlock;
+}
+
+function counterIsNewer(candidate: number, current: number): boolean {
+  const difference = (candidate - current) >>> 0;
+  return difference !== 0 && difference < 0x80000000;
+}
+
+function blockIsNewer(
+  candidate: PlatinumSaveBlock,
+  current: PlatinumSaveBlock,
+): boolean {
+  if (candidate.footer.saveCounter !== current.footer.saveCounter) {
+    return counterIsNewer(
+      candidate.footer.saveCounter,
+      current.footer.saveCounter,
+    );
+  }
+
+  return counterIsNewer(
+    candidate.footer.blockCounter,
+    current.footer.blockCounter,
+  );
+}
+
+function newestBlock(blocks: PlatinumSaveBlock[]): PlatinumSaveBlock {
+  if (blocks.length === 0) {
+    throw new Error('No valid Platinum save block copies');
+  }
+
+  return blocks.slice(1).reduce(
+    (current, candidate) =>
+      blockIsNewer(candidate, current) ? candidate : current,
+    blocks[0]!,
+  );
+}
+
+function validBlockCopies(
+  bytes: Uint8Array,
+  specification: {
+    offset: number;
+    size: number;
+    blockId: number;
+  },
+): PlatinumSaveBlock[] {
+  const blocks: PlatinumSaveBlock[] = [];
+
+  for (const copyOffset of PLATINUM_SAVE_COPY_OFFSETS) {
+    const offset = copyOffset + specification.offset;
+
+    try {
+      blocks.push({
+        offset,
+        footer: validatePlatinumSaveBlock(
+          bytes,
+          offset,
+          specification.size,
+          specification.blockId,
+        ),
+      });
+    } catch {
+      // The other duplicated copy may still be valid.
+    }
+  }
+
+  return blocks;
+}
+
+export function selectPlatinumSaveBlocks(
+  bytes: Uint8Array,
+): PlatinumSaveBlocks {
+  validatePlatinumSaveSize(bytes);
+
+  const general = newestBlock(
+    validBlockCopies(bytes, PLATINUM_GENERAL_BLOCK),
+  );
+
+  const storage = newestBlock(
+    validBlockCopies(bytes, PLATINUM_STORAGE_BLOCK),
+  );
+
+  if (general.footer.saveCounter !== storage.footer.saveCounter) {
+    throw new Error(
+      `Platinum general/storage save counters disagree: ${general.footer.saveCounter} and ${storage.footer.saveCounter}`,
+    );
+  }
+
+  return { general, storage };
+}
