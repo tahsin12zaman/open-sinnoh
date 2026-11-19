@@ -17,3 +17,4 @@ export * from './hgss/followers.ts';
 export * from './platinum-save.ts';
 export { objectiveTexts } from './objectives.ts';
 export * from './platinum-party.ts';
+export * from './platinum-save-state.ts';
