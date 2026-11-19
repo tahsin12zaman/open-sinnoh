@@ -1,12 +1,21 @@
 import type { GameState } from '@opensinnoh/contracts';
 import {
+  readPlatinumPlayerLocation,
   readPlatinumTrainerData,
+  type PlatinumLocation,
   type PlatinumTrainerData,
 } from '@opensinnoh/nds';
 import charmapFile from '../data/charmap.json' with { type: 'json' };
-import { charTable, type CharmapFile } from './names.ts';
+import namesFile from '../data/names.json' with { type: 'json' };
+import {
+  charTable,
+  Names,
+  type CharmapFile,
+  type NamesFile,
+} from './names.ts';
 
 const CHARS = charTable(charmapFile as CharmapFile);
+const NAMES = new Names(namesFile as NamesFile);
 
 export type ImportedPlatinumTrainer = Omit<
   PlatinumTrainerData,
@@ -64,6 +73,25 @@ function platinumGender(
   throw new Error(`Unknown Platinum trainer gender ${gender}`);
 }
 
+function platinumFacing(
+  direction: number,
+): GameState['player']['facing'] {
+  switch (direction) {
+    case 0:
+      return 'up';
+    case 1:
+      return 'down';
+    case 2:
+      return 'left';
+    case 3:
+      return 'right';
+    default:
+      throw new Error(
+        `Unknown Platinum facing direction ${direction}`,
+      );
+  }
+}
+
 export function applyPlatinumTrainer(
   state: GameState,
   trainer: ImportedPlatinumTrainer,
@@ -89,12 +117,42 @@ export function applyPlatinumTrainer(
   };
 }
 
+export function applyPlatinumLocation(
+  state: GameState,
+  location: PlatinumLocation,
+): GameState {
+  if (
+    location.mapHeaderId < 0 ||
+    location.mapHeaderId >= NAMES.file.zones.length
+  ) {
+    throw new Error(
+      `Unknown Platinum map header ${location.mapHeaderId}`,
+    );
+  }
+
+  return {
+    ...state,
+    player: {
+      ...state.player,
+      zone: NAMES.zone(location.mapHeaderId),
+      x: location.x,
+      z: location.z,
+      facing: platinumFacing(location.faceDirection),
+    },
+  };
+}
+
 export function applyPlatinumSave(
   state: GameState,
   save: Uint8Array,
 ): GameState {
-  return applyPlatinumTrainer(
+  const withTrainer = applyPlatinumTrainer(
     state,
     importPlatinumTrainer(save),
+  );
+
+  return applyPlatinumLocation(
+    withTrainer,
+    readPlatinumPlayerLocation(save),
   );
 }

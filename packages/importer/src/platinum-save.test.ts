@@ -1,6 +1,7 @@
 import type { GameState } from '@opensinnoh/contracts';
 import { describe, expect, it } from 'vitest';
 import {
+  applyPlatinumLocation,
   applyPlatinumTrainer,
   convertPlatinumTrainerData,
   decodePlatinumName,
@@ -48,6 +49,13 @@ function makeBaseState(): GameState {
       minutes: 0,
       seconds: 0,
     },
+    player: {
+      zone: 'platinum:MAP_HEADER_TWINLEAF_TOWN',
+      x: 5,
+      z: 6,
+      y: 7,
+      facing: 'up',
+    },
   } as GameState;
 }
 
@@ -77,7 +85,10 @@ describe('Platinum save import', () => {
 
   it('applies trainer data to an OpenSinnoh state', () => {
     const base = makeBaseState();
-    const converted = applyPlatinumTrainer(base, TEST_TRAINER);
+    const converted = applyPlatinumTrainer(
+      base,
+      TEST_TRAINER,
+    );
 
     expect(converted).toMatchObject({
       names: {
@@ -106,5 +117,46 @@ describe('Platinum save import', () => {
         gender: 2,
       }),
     ).toThrow(/gender 2/i);
+  });
+
+  it.each([
+    [0, 'up'],
+    [1, 'down'],
+    [2, 'left'],
+    [3, 'right'],
+  ] as const)(
+    'maps native facing %i to %s',
+    (faceDirection, facing) => {
+      const converted = applyPlatinumLocation(
+        makeBaseState(),
+        {
+          mapHeaderId: 0,
+          warpId: -1,
+          x: 17,
+          z: 29,
+          faceDirection,
+        },
+      );
+
+      expect(converted.player).toEqual({
+        zone: 'platinum:MAP_HEADER_EVERYWHERE',
+        x: 17,
+        z: 29,
+        y: 7,
+        facing,
+      });
+    },
+  );
+
+  it('rejects an unknown map header', () => {
+    expect(() =>
+      applyPlatinumLocation(makeBaseState(), {
+        mapHeaderId: 999999,
+        warpId: -1,
+        x: 17,
+        z: 29,
+        faceDirection: 0,
+      }),
+    ).toThrow(/map header 999999/i);
   });
 });
