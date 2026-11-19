@@ -7,3 +7,4 @@ export * from './supported-roms.ts';
 export * from './lz.ts';
 export * from './blz.ts';
 export * from './writer.ts';
+export * from './platinum-save.ts';
