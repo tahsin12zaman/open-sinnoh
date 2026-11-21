@@ -12,7 +12,11 @@
  *
  * A movement animation's step (a face or a one-frame delay) takes one tick, and its end is seen on the tick after.
  */
-import type { Facing } from '@opensinnoh/contracts';
+import type {
+  Facing,
+  RuntimeSpinSnapshot,
+  RuntimeTeleportTaskSnapshot,
+} from '@opensinnoh/contracts';
 import { CameraZoom, FX } from './fly.ts';
 import { HmCutIn } from './hm-cut-in.ts';
 
@@ -32,7 +36,27 @@ class Spin {
   private ticks: (Facing | null)[];
   private at = 0;
   constructor(steps: Step[]) {
-    this.ticks = steps.flatMap((s) => (typeof s === 'number' ? Array<null>(s).fill(null) : [s]));
+    this.ticks = steps.flatMap((s) =>
+      typeof s === 'number'
+        ? Array<null>(s).fill(null)
+        : [s],
+    );
+  }
+
+  capture(): RuntimeSpinSnapshot {
+    return {
+      ticks: [...this.ticks],
+      at: this.at,
+    };
+  }
+
+  static restore(snapshot: RuntimeSpinSnapshot): Spin {
+    const spin = new Spin([]);
+
+    spin.ticks = [...snapshot.ticks];
+    spin.at = snapshot.at;
+
+    return spin;
   }
   /** The facing this tick sets, if any. */
   tick(): Facing | null {
@@ -63,6 +87,38 @@ export class TeleportTask {
   done = false;
 
   constructor(private readonly h: TeleportHost) {}
+
+  capture(): RuntimeTeleportTaskSnapshot {
+    return {
+      kind: 'teleport',
+      phase: this.phase,
+      spin: this.spin?.capture() ?? null,
+      delay: this.delay,
+      gap: this.gap,
+      zoom: this.zoom.capture(),
+      zoomActive: this.zoomActive,
+      done: this.done,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimeTeleportTaskSnapshot,
+    host: TeleportHost,
+  ): TeleportTask {
+    const task = new TeleportTask(host);
+
+    task.phase = snapshot.phase;
+    task.spin = snapshot.spin
+      ? Spin.restore(snapshot.spin)
+      : null;
+    task.delay = snapshot.delay;
+    task.gap = snapshot.gap;
+    task.zoom.restore(snapshot.zoom);
+    task.zoomActive = snapshot.zoomActive;
+    task.done = snapshot.done;
+
+    return task;
+  }
 
   private runSpin(): void {
     const f = this.spin?.tick();

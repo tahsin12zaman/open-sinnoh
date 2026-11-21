@@ -2,6 +2,7 @@ import type {
   Button,
   Id,
 } from '@opensinnoh/core';
+import type { Facing } from './records.ts';
 
 /**
  * Raw input state between game ticks. `previous` is required so a
@@ -77,4 +78,40 @@ export interface RuntimeSweetScentTaskSnapshot {
     value: number;
   };
   wait: number;
+}
+
+export interface RuntimeCameraZoomSnapshot {
+  offset: number;
+  mode: number;
+  sub: number;
+  step: number;
+  target: number;
+  count: number;
+  frames: number;
+  done: boolean;
+}
+
+export interface RuntimeSpinSnapshot {
+  ticks: (Facing | null)[];
+  at: number;
+}
+
+export interface RuntimeTeleportTaskSnapshot {
+  kind: 'teleport';
+  phase:
+    | 'cut-in'
+    | 'out-start'
+    | 'out-spin'
+    | 'out-fade'
+    | 'map'
+    | 'in-start'
+    | 'in-fade'
+    | 'in-slow'
+    | 'in-end';
+  spin: RuntimeSpinSnapshot | null;
+  delay: number;
+  gap: number;
+  zoom: RuntimeCameraZoomSnapshot;
+  zoomActive: boolean;
+  done: boolean;
 }

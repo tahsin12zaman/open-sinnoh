@@ -8,7 +8,10 @@
  * wind 132, the cut-in or landing 133, the player's show/hide 134, the camera zoom last); a task created during a
  * tick starts on the next one. The cut-in's state functions repeat within a tick while they return true.
  */
-import type { FlySceneView } from '@opensinnoh/contracts';
+import type {
+  FlySceneView,
+  RuntimeCameraZoomSnapshot,
+} from '@opensinnoh/contracts';
 
 export const FX = 4096;
 const fx = (v: number) => Math.round(v * FX);
@@ -31,6 +34,30 @@ export class CameraZoom {
   private count = 0;
   private frames = 0;
   done = false;
+
+  capture(): RuntimeCameraZoomSnapshot {
+    return {
+      offset: this.offset,
+      mode: this.mode,
+      sub: this.sub,
+      step: this.step,
+      target: this.target,
+      count: this.count,
+      frames: this.frames,
+      done: this.done,
+    };
+  }
+
+  restore(snapshot: RuntimeCameraZoomSnapshot): void {
+    this.offset = snapshot.offset;
+    this.mode = snapshot.mode;
+    this.sub = snapshot.sub;
+    this.step = snapshot.step;
+    this.target = snapshot.target;
+    this.count = snapshot.count;
+    this.frames = snapshot.frames;
+    this.done = snapshot.done;
+  }
 
   set(mode: 1 | 2, delta: number, frames: number): void {
     [this.mode, this.sub, this.count, this.frames, this.done] = [mode, 0, 0, frames, false];
