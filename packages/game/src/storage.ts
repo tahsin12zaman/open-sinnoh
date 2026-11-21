@@ -82,6 +82,47 @@ export class IndexedDbSaveStore {
     return (await this.run('readonly', (s) => s.get(slot))) as string | undefined;
   }
 
+  /** Stores opaque binary data. Use a separate database from JSON save slots. */
+  async putBytes(
+    slot: string,
+    bytes: Uint8Array,
+  ): Promise<void> {
+    await this.run(
+      'readwrite',
+      (store) =>
+        store.put(
+          bytes.slice(),
+          slot,
+        ),
+    );
+  }
+
+  /** Reads opaque binary data, or undefined when the slot is absent. */
+  async getBytes(
+    slot: string,
+  ): Promise<Uint8Array | undefined> {
+    const value = await this.run(
+      'readonly',
+      (store) => store.get(slot),
+    );
+
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (value instanceof Uint8Array) {
+      return value;
+    }
+
+    if (value instanceof ArrayBuffer) {
+      return new Uint8Array(value);
+    }
+
+    throw new Error(
+      `binary save slot "${slot}" is malformed`,
+    );
+  }
+
   async list(): Promise<SaveSlot[]> {
     const keys = (await this.run('readonly', (s) => s.getAllKeys())) as string[];
     const out: SaveSlot[] = [];

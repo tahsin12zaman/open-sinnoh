@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   parsePlatinumPartyPokemon,
+  writePlatinumPartyPokemonData,
 } from './platinum-pokemon-data.ts';
 import {
   readPlatinumParty,
@@ -252,4 +253,199 @@ describe('Platinum Pokémon fields', () => {
       }
     },
   );
+});
+
+describe('Platinum Pokémon field writing', () => {
+  it('round-trips every semantic Pokémon field', () => {
+    const base = makeDecodedPokemon();
+    const parsed =
+      parsePlatinumPartyPokemon(base);
+
+    const written =
+      writePlatinumPartyPokemonData(
+        parsed,
+        base,
+      );
+
+    expect(
+      parsePlatinumPartyPokemon(
+        written,
+      ),
+    ).toEqual(parsed);
+
+    expect(
+      written.personality,
+    ).toBe(parsed.personality);
+  });
+
+  it('preserves unmodeled decrypted bytes', () => {
+    const base = makeDecodedPokemon();
+
+    base.blocks[2][0x16] = 0xa5;
+    base.blocks[3][0x1d] = 0x6b;
+    base.partyData[0x20] = 0x5a;
+
+    const parsed =
+      parsePlatinumPartyPokemon(base);
+
+    const written =
+      writePlatinumPartyPokemonData(
+        parsed,
+        base,
+      );
+
+    expect(
+      written.blocks[2][0x16],
+    ).toBe(0xa5);
+    expect(
+      written.blocks[3][0x1d],
+    ).toBe(0x6b);
+    expect(
+      written.partyData[0x20],
+    ).toBe(0x5a);
+  });
+
+  it('creates valid blocks without a base record', () => {
+    const parsed =
+      parsePlatinumPartyPokemon(
+        makeDecodedPokemon(),
+      );
+
+    const written =
+      writePlatinumPartyPokemonData(
+        parsed,
+      );
+
+    expect(
+      parsePlatinumPartyPokemon(
+        written,
+      ),
+    ).toEqual(parsed);
+
+    expect(written.sanity).toBe(0);
+  });
+
+  it('preserves legacy location storage', () => {
+    const base = makeDecodedPokemon();
+
+    const blockB = new DataView(
+      base.blocks[1].buffer,
+      base.blocks[1].byteOffset,
+      base.blocks[1].byteLength,
+    );
+
+    const blockD = new DataView(
+      base.blocks[3].buffer,
+      base.blocks[3].byteOffset,
+      base.blocks[3].byteLength,
+    );
+
+    blockB.setUint16(
+      0x1c,
+      0,
+      true,
+    );
+    blockD.setUint16(
+      0x16,
+      300,
+      true,
+    );
+
+    const parsed =
+      parsePlatinumPartyPokemon(base);
+
+    const written =
+      writePlatinumPartyPokemonData(
+        {
+          ...parsed,
+          eggLocation: 301,
+        },
+        base,
+      );
+
+    const writtenB = new DataView(
+      written.blocks[1].buffer,
+      written.blocks[1].byteOffset,
+      written.blocks[1].byteLength,
+    );
+
+    const writtenD = new DataView(
+      written.blocks[3].buffer,
+      written.blocks[3].byteOffset,
+      written.blocks[3].byteLength,
+    );
+
+    expect(
+      writtenB.getUint16(
+        0x1c,
+        true,
+      ),
+    ).toBe(0);
+
+    expect(
+      writtenD.getUint16(
+        0x16,
+        true,
+      ),
+    ).toBe(301);
+  });
+
+  it('rejects invalid semantic Pokémon data', () => {
+    const parsed =
+      parsePlatinumPartyPokemon(
+        makeDecodedPokemon(),
+      );
+
+    expect(() =>
+      writePlatinumPartyPokemonData({
+        ...parsed,
+        species: 494,
+      }),
+    ).toThrow(/species/i);
+
+    expect(() =>
+      writePlatinumPartyPokemonData({
+        ...parsed,
+        moves: [
+          1,
+          2,
+          3,
+          4,
+          5,
+        ],
+        pp: [
+          1,
+          1,
+          1,
+          1,
+          1,
+        ],
+        ppUps: [
+          0,
+          0,
+          0,
+          0,
+          0,
+        ],
+      }),
+    ).toThrow(/move count/i);
+
+    expect(() =>
+      writePlatinumPartyPokemonData({
+        ...parsed,
+        nicknameCodes: [1],
+      }),
+    ).toThrow(/nickname length/i);
+
+    expect(() =>
+      writePlatinumPartyPokemonData({
+        ...parsed,
+        metDate: {
+          year: 24,
+          month: 0,
+          day: 2,
+        },
+      }),
+    ).toThrow(/met date/i);
+  });
 });

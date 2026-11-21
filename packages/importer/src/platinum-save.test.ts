@@ -5,6 +5,7 @@ import {
   applyPlatinumTrainer,
   convertPlatinumTrainerData,
   decodePlatinumName,
+  encodePlatinumName,
   type ImportedPlatinumTrainer,
 } from './platinum-save.ts';
 
@@ -67,6 +68,42 @@ function makeBaseState(): GameState {
 describe('Platinum save import', () => {
   it('decodes a native trainer name', () => {
     expect(decodePlatinumName(TEST_NAME_CODES)).toBe('Test');
+  });
+
+  it('encodes a fixed-length native trainer name', () => {
+    const codes =
+      encodePlatinumName('Test', 8);
+
+    expect(codes).toEqual([
+      318,
+      329,
+      343,
+      344,
+      0xffff,
+      0xffff,
+      0xffff,
+      0xffff,
+    ]);
+
+    expect(
+      decodePlatinumName(codes),
+    ).toBe('Test');
+  });
+
+  it('rejects an unencodable or oversized name', () => {
+    expect(() =>
+      encodePlatinumName(
+        'TooLong',
+        3,
+      ),
+    ).toThrow(/exceeds/i);
+
+    expect(() =>
+      encodePlatinumName(
+        '🙂',
+        8,
+      ),
+    ).toThrow(/cannot be encoded/i);
   });
 
   it('converts raw trainer data', () => {

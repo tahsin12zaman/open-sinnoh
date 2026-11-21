@@ -8,12 +8,17 @@ import type {
   PackData,
 } from '@opensinnoh/core';
 import {
+  PLATINUM_SAVE_SIZE,
+  selectPlatinumSaveBlocks,
+} from '@opensinnoh/nds';
+import {
   beforeAll,
   describe,
   expect,
   it,
 } from 'vitest';
 import { importPlatinum } from './platinum.ts';
+import { exportPlatinumSaveState } from './platinum-save-export.ts';
 import { importPlatinumSaveState } from './platinum-save-state.ts';
 
 const romPath = process.env.OPENSINNOH_NDS_ROM;
@@ -161,5 +166,86 @@ describe.skipIf(!romPath || !savePath)(
       expect(base.party).toEqual([]);
       expect(base.boxes).toEqual([]);
     });
+
+    it('exports and re-imports a real Platinum save', () => {
+      const original = new Uint8Array(
+        readFileSync(savePath!),
+      );
+
+      const imported = importPlatinumSaveState(
+        makeBaseState(),
+        original,
+        registries,
+      );
+
+      const exported = exportPlatinumSaveState(
+        imported,
+        original,
+        registries,
+      );
+
+      expect(exported).not.toBe(original);
+      expect(exported).toHaveLength(
+        PLATINUM_SAVE_SIZE,
+      );
+
+      const blocks =
+        selectPlatinumSaveBlocks(exported);
+
+      expect(
+        blocks.general.footer.signature,
+      ).toBe(0x20060623);
+
+      expect(
+        blocks.storage.footer.signature,
+      ).toBe(0x20060623);
+
+      const reimported =
+        importPlatinumSaveState(
+          makeBaseState(),
+          exported,
+          registries,
+        );
+
+      const fields = [
+        'names',
+        'gender',
+        'trainerId',
+        'appearance',
+        'money',
+        'coins',
+        'playTime',
+        'player',
+        'badges',
+        'cyclingGear',
+        'runningShoes',
+        'playerState',
+        'flags',
+        'vars',
+        'bag',
+        'registeredItem',
+        'party',
+        'boxes',
+        'currentBox',
+        'wallpapersUnlocked',
+        'pokedex',
+        'options',
+        'weather',
+        'previousZone',
+        'specialLocation',
+        'escapeLocation',
+        'safari',
+        'gameTime',
+        'startDate',
+      ] as const;
+
+      for (const field of fields) {
+        expect(
+          reimported[field],
+          `round-trip field ${field}`,
+        ).toEqual(imported[field]);
+      }
+    });
+
   },
 );

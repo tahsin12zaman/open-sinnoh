@@ -25,6 +25,7 @@ function fakeEnv(opts: { app?: boolean; where?: 'title' | 'game'; rom?: boolean 
   const mods = [{ id: 'demo', name: 'Demo', on: false }];
   const data: DataActions = {
     exportSave: async () => (calls.push('export'), 'Exported.'),
+    exportPlatinumSave: async () => (calls.push('exportPlatinum'), 'Exported.'),
     importSave: async () => (calls.push('import'), 'Loaded.'),
     rom: rom
       ? {
@@ -80,7 +81,7 @@ describe('the settings registry', () => {
       zoom: 'device', renderScale: 'device', visualStyle: 'device', menuStyle: 'device', angledCamera: 'device', speed: 'device', followers: 'device', followerStyle: 'device', autoLowercase: 'device', volume: 'device', mute: 'device', tradeEvolution: 'device', theme: 'device', uiFrame: 'device', reduceFlashing: 'device',
       controlSize: 'device', controlOpacity: 'device', haptics: 'device', keepAwake: 'device', fullscreen: 'none',
       ...Object.fromEntries(['up', 'down', 'left', 'right', 'a', 'b', 'x', 'y', 'l', 'r', 'start', 'select', 'fast', 'poketch'].map((a) => [`bind/${a}`, 'device'])), deadZone: 'device', resetControls: 'none',
-      exportSave: 'none', importSave: 'none', install: 'none', update: 'none', storage: 'none', reimport: 'none', addon: 'none', deleteRom: 'none',
+      exportSave: 'none', exportPlatinumSave: 'none', importSave: 'none', install: 'none', update: 'none', storage: 'none', reimport: 'none', addon: 'none', deleteRom: 'none',
       reports: 'device',
     });
   });
@@ -102,7 +103,7 @@ describe('the settings registry', () => {
       ['textSpeed', 'sound', 'battleScene', 'battleStyle', 'buttonMode', 'frame', 'repelPrompt', 'followerTalk', 'statView', 'summaryRename', 'dexNameSearch', 'spiritombVendors', 'objective', 'introSkip'],
       ['zoom', 'renderScale', 'visualStyle', 'menuStyle', 'angledCamera', 'reduceFlashing', 'volume', 'mute', 'speed', 'followers', 'followerStyle', 'character', 'autoLowercase', 'tradeEvolution', 'theme', 'uiFrame', 'controlSize', 'controlOpacity', 'haptics', 'keepAwake'],
       ['autoRun', 'itemWheel', ...['up', 'down', 'left', 'right', 'a', 'b', 'x', 'y', 'l', 'r', 'start', 'select', 'fast', 'poketch'].map((a) => `bind/${a}`), 'padLayout', 'deadZone', 'resetControls'],
-      ['exportSave', 'importSave', 'suspend', 'storage', 'reimport', 'addon', 'deleteRom', 'mod/demo'],
+      ['exportSave', 'exportPlatinumSave', 'importSave', 'suspend', 'storage', 'reimport', 'addon', 'deleteRom', 'mod/demo'],
       ['reports'],
     ]);
     // Without the app's hooks and the imported ROM only what does not need them is left, and the sections stay.
@@ -110,7 +111,7 @@ describe('the settings registry', () => {
       ['game', ['textSpeed', 'sound', 'battleScene', 'battleStyle', 'buttonMode', 'frame', 'repelPrompt', 'followerTalk', 'statView', 'summaryRename', 'dexNameSearch', 'spiritombVendors', 'objective', 'introSkip']],
       ['device', ['menuStyle', 'reduceFlashing', 'followers', 'followerStyle', 'character', 'autoLowercase', 'tradeEvolution', 'theme', 'uiFrame']],
       ['controls', ['autoRun', 'itemWheel', ...['up', 'down', 'left', 'right', 'a', 'b', 'x', 'y', 'l', 'r', 'start', 'select', 'fast', 'poketch'].map((a) => `bind/${a}`), 'padLayout', 'deadZone', 'resetControls']],
-      ['data', ['exportSave', 'importSave', 'suspend', 'mod/demo']],
+      ['data', ['exportSave', 'exportPlatinumSave', 'importSave', 'suspend', 'mod/demo']],
     ]);
   });
 
@@ -214,8 +215,14 @@ describe('the title and the game share the screen', () => {
 describe('the data actions', () => {
   it('each row runs its action; the add-on row adds or removes by what is imported', async () => {
     const { env, calls, app } = fakeEnv();
-    for (const id of ['exportSave', 'importSave', 'reimport', 'deleteRom']) await byId(id).run!(env);
-    expect(calls).toEqual(['export', 'import', 'reimport', 'remove']);
+    for (const id of ['exportSave', 'exportPlatinumSave', 'importSave', 'reimport', 'deleteRom']) await byId(id).run!(env);
+    expect(calls).toEqual([
+      'export',
+      'exportPlatinum',
+      'import',
+      'reimport',
+      'remove',
+    ]);
     const addon = byId('addon');
     expect(addon.values(env)).toEqual(['REMOVE']);
     expect(addon.description(env)).toContain('HeartGold');
@@ -223,7 +230,7 @@ describe('the data actions', () => {
     app.addon = null;
     expect(addon.values(env)).toEqual(['ADD']);
     await addon.run!(env);
-    expect(calls.slice(4)).toEqual(['removeAddon', 'addAddon']);
+    expect(calls.slice(5)).toEqual(['removeAddon', 'addAddon']);
   });
 
   it('the destructive ones ask first; a mod flips by what is on', async () => {

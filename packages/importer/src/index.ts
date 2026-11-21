@@ -27,3 +27,6 @@ export * from './platinum-daycare.ts';
 export * from './platinum-map-objects.ts';
 export * from './platinum-field-state.ts';
 export * from './platinum-berry-patches.ts';
+export * from './platinum-save-export.ts';
+export * from './platinum-pokemon-export.ts';
+export * from './platinum-pokedex-export.ts';

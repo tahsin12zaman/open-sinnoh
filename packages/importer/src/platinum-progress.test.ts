@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   applyPlatinumProgressData,
+  convertOpenSinnohProgress,
   type PlatinumProgressRegistries,
 } from './platinum-progress.ts';
 
@@ -157,5 +158,58 @@ describe('Platinum progress import', () => {
       [id('test:VAR_FIVE_DEFAULT')]: 99,
       [id('mod:VAR_KEEP')]: 42,
     });
+  });
+});
+
+describe('Platinum progress export', () => {
+  it('reconstructs registry-backed native values', () => {
+    const exported = convertOpenSinnohProgress(
+      makeState(),
+      makeProgress(),
+      makeRegistries(),
+    );
+
+    expect(exported.flags).toEqual([1, 3]);
+
+    expect(exported.vars[0]).toBe(99);
+    expect(exported.vars[1]).toBe(0);
+    expect(exported.vars[2]).toBe(99);
+    expect(exported.vars[3]).toBe(5);
+  });
+
+  it('preserves native values without registry records', () => {
+    const base = makeProgress();
+
+    base.flags.push(100);
+    base.vars[10] = 321;
+
+    const exported = convertOpenSinnohProgress(
+      makeState(),
+      base,
+      makeRegistries(),
+    );
+
+    expect(exported.flags).toContain(100);
+    expect(exported.vars[10]).toBe(321);
+    expect(base.flags).toEqual([2, 4, 100]);
+    expect(base.vars[10]).toBe(321);
+  });
+
+  it('restores registry defaults when overrides are absent', () => {
+    const exported = convertOpenSinnohProgress(
+      {
+        flags: {},
+        vars: {},
+      },
+      makeProgress(),
+      makeRegistries(),
+    );
+
+    expect(exported.flags).toEqual([3, 4]);
+
+    expect(exported.vars[0]).toBe(0);
+    expect(exported.vars[1]).toBe(0);
+    expect(exported.vars[2]).toBe(5);
+    expect(exported.vars[3]).toBe(5);
   });
 });

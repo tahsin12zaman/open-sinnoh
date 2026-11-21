@@ -252,6 +252,94 @@ export function selectPlatinumSaveBlocks(
   return { general, storage };
 }
 
+export interface PlatinumWritableSave {
+  general: Uint8Array;
+  storage: Uint8Array;
+}
+
+/**
+ * Clones a Platinum save, lets the caller modify the selected block
+ * bodies, then refreshes and validates their checksums. Footers and
+ * the older duplicate copies remain inaccessible to the writer.
+ */
+export function writePlatinumSave(
+  bytes: Uint8Array,
+  write: (save: PlatinumWritableSave) => void,
+): Uint8Array {
+  const blocks = selectPlatinumSaveBlocks(bytes);
+  const output = bytes.slice();
+
+  const body = (
+    block: PlatinumSaveBlock,
+    size: number,
+  ) =>
+    output.subarray(
+      block.offset,
+      block.offset +
+        size -
+        PLATINUM_SAVE_FOOTER_SIZE,
+    );
+
+  write({
+    general: body(
+      blocks.general,
+      PLATINUM_GENERAL_BLOCK.size,
+    ),
+    storage: body(
+      blocks.storage,
+      PLATINUM_STORAGE_BLOCK.size,
+    ),
+  });
+
+  const refresh = (
+    block: PlatinumSaveBlock,
+    size: number,
+    blockId: number,
+  ) => {
+    const footerOffset =
+      block.offset +
+      size -
+      PLATINUM_SAVE_FOOTER_SIZE;
+
+    const view = new DataView(
+      output.buffer,
+      output.byteOffset,
+      output.byteLength,
+    );
+
+    view.setUint16(
+      footerOffset + 18,
+      crc16Ccitt(
+        output,
+        block.offset,
+        footerOffset,
+      ),
+      true,
+    );
+
+    validatePlatinumSaveBlock(
+      output,
+      block.offset,
+      size,
+      blockId,
+    );
+  };
+
+  refresh(
+    blocks.general,
+    PLATINUM_GENERAL_BLOCK.size,
+    PLATINUM_GENERAL_BLOCK.blockId,
+  );
+
+  refresh(
+    blocks.storage,
+    PLATINUM_STORAGE_BLOCK.size,
+    PLATINUM_STORAGE_BLOCK.blockId,
+  );
+
+  return output;
+}
+
 export interface PlatinumTrainerData {
   nameCodes: number[];
   trainerId: number;
@@ -318,6 +406,230 @@ export function readPlatinumTrainerData(
   };
 }
 
+function validateInteger(
+  name: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+): void {
+  if (
+    !Number.isInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error(
+      `Invalid Platinum ${name} value ${value}`,
+    );
+  }
+}
+
+/**
+ * Writes every modeled trainer-card field while preserving all
+ * unrelated and unknown Platinum save bytes.
+ */
+export function writePlatinumTrainerData(
+  bytes: Uint8Array,
+  trainer: PlatinumTrainerData,
+): Uint8Array {
+  if (trainer.nameCodes.length !== 8) {
+    throw new Error(
+      `Invalid Platinum trainer name length ${trainer.nameCodes.length}`,
+    );
+  }
+
+  trainer.nameCodes.forEach((code, index) =>
+    validateInteger(
+      `trainer name code ${index}`,
+      code,
+      0,
+      0xffff,
+    ),
+  );
+
+  validateInteger(
+    'trainer ID',
+    trainer.trainerId,
+    0,
+    0xffff,
+  );
+  validateInteger(
+    'secret ID',
+    trainer.secretId,
+    0,
+    0xffff,
+  );
+  validateInteger(
+    'money',
+    trainer.money,
+    0,
+    999999,
+  );
+  validateInteger(
+    'gender',
+    trainer.gender,
+    0,
+    1,
+  );
+  validateInteger(
+    'language',
+    trainer.language,
+    0,
+    0xff,
+  );
+  validateInteger(
+    'badges',
+    trainer.badges,
+    0,
+    0xff,
+  );
+  validateInteger(
+    'appearance',
+    trainer.appearance,
+    0,
+    0xff,
+  );
+  validateInteger(
+    'game code',
+    trainer.gameCode,
+    0,
+    0xff,
+  );
+  validateInteger(
+    'coins',
+    trainer.coins,
+    0,
+    9999,
+  );
+  validateInteger(
+    'play-time hours',
+    trainer.playTime.hours,
+    0,
+    999,
+  );
+  validateInteger(
+    'play-time minutes',
+    trainer.playTime.minutes,
+    0,
+    59,
+  );
+  validateInteger(
+    'play-time seconds',
+    trainer.playTime.seconds,
+    0,
+    59,
+  );
+
+  if (
+    typeof trainer.mainStoryCleared !==
+      'boolean' ||
+    typeof trainer.hasNationalDex !==
+      'boolean'
+  ) {
+    throw new Error(
+      'Invalid Platinum trainer completion flags',
+    );
+  }
+
+  return writePlatinumSave(
+    bytes,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      trainer.nameCodes.forEach(
+        (code, index) => {
+          view.setUint16(
+            0x68 + index * 2,
+            code,
+            true,
+          );
+        },
+      );
+
+      view.setUint32(
+        0x78,
+        (
+          trainer.trainerId |
+          (trainer.secretId << 16)
+        ) >>> 0,
+        true,
+      );
+
+      view.setUint32(
+        0x7c,
+        trainer.money,
+        true,
+      );
+      view.setUint8(0x80, trainer.gender);
+      view.setUint8(0x81, trainer.language);
+      view.setUint8(0x82, trainer.badges);
+      view.setUint8(0x83, trainer.appearance);
+      view.setUint8(0x84, trainer.gameCode);
+
+      const oldFlags = view.getUint8(0x85);
+      const completionFlags =
+        (oldFlags & ~0x3) |
+        (trainer.mainStoryCleared ? 0x1 : 0) |
+        (trainer.hasNationalDex ? 0x2 : 0);
+
+      view.setUint8(0x85, completionFlags);
+      view.setUint16(
+        0x88,
+        trainer.coins,
+        true,
+      );
+      view.setUint16(
+        0x8a,
+        trainer.playTime.hours,
+        true,
+      );
+      view.setUint8(
+        0x8c,
+        trainer.playTime.minutes,
+      );
+      view.setUint8(
+        0x8d,
+        trainer.playTime.seconds,
+      );
+    },
+  );
+}
+
+/**
+ * Writes the player's carried money while preserving every other
+ * byte of the original Platinum save.
+ */
+export function writePlatinumTrainerMoney(
+  bytes: Uint8Array,
+  money: number,
+): Uint8Array {
+  if (
+    !Number.isInteger(money) ||
+    money < 0 ||
+    money > 999999
+  ) {
+    throw new Error(
+      `Invalid Platinum money value ${money}`,
+    );
+  }
+
+  return writePlatinumSave(
+    bytes,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      view.setUint32(0x7c, money, true);
+    },
+  );
+}
+
 export const PLATINUM_FIELD_STATE_OFFSET = 0x1280;
 
 export interface PlatinumLocation {
@@ -367,6 +679,79 @@ export function readPlatinumPlayerLocation(
   return location;
 }
 
+export function writePlatinumPlayerLocation(
+  bytes: Uint8Array,
+  location: PlatinumLocation,
+): Uint8Array {
+  validateInteger(
+    'map header',
+    location.mapHeaderId,
+    0,
+    0x7fffffff,
+  );
+  validateInteger(
+    'warp ID',
+    location.warpId,
+    -0x80000000,
+    0x7fffffff,
+  );
+  validateInteger(
+    'x coordinate',
+    location.x,
+    -0x80000000,
+    0x7fffffff,
+  );
+  validateInteger(
+    'z coordinate',
+    location.z,
+    -0x80000000,
+    0x7fffffff,
+  );
+  validateInteger(
+    'facing direction',
+    location.faceDirection,
+    0,
+    3,
+  );
+
+  return writePlatinumSave(
+    bytes,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      view.setInt32(
+        PLATINUM_FIELD_STATE_OFFSET,
+        location.mapHeaderId,
+        true,
+      );
+      view.setInt32(
+        PLATINUM_FIELD_STATE_OFFSET + 4,
+        location.warpId,
+        true,
+      );
+      view.setInt32(
+        PLATINUM_FIELD_STATE_OFFSET + 8,
+        location.x,
+        true,
+      );
+      view.setInt32(
+        PLATINUM_FIELD_STATE_OFFSET + 12,
+        location.z,
+        true,
+      );
+      view.setInt32(
+        PLATINUM_FIELD_STATE_OFFSET + 16,
+        location.faceDirection,
+        true,
+      );
+    },
+  );
+}
+
 /**
  * SAVE_TABLE_ENTRY_MISC starts at 0x1fc4 in Platinum's selected
  * general block. MiscSaveBlock.rivalName follows 128 padded
@@ -400,4 +785,49 @@ export function readPlatinumRivalData(
   );
 
   return { nameCodes };
+}
+
+export function writePlatinumRivalData(
+  bytes: Uint8Array,
+  rival: PlatinumRivalData,
+): Uint8Array {
+  if (
+    rival.nameCodes.length !==
+    PLATINUM_TRAINER_NAME_CODE_COUNT
+  ) {
+    throw new Error(
+      `Invalid Platinum rival name length ${rival.nameCodes.length}`,
+    );
+  }
+
+  rival.nameCodes.forEach((code, index) =>
+    validateInteger(
+      `rival name code ${index}`,
+      code,
+      0,
+      0xffff,
+    ),
+  );
+
+  return writePlatinumSave(
+    bytes,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      rival.nameCodes.forEach(
+        (code, index) => {
+          view.setUint16(
+            PLATINUM_RIVAL_NAME_OFFSET +
+              index * 2,
+            code,
+            true,
+          );
+        },
+      );
+    },
+  );
 }

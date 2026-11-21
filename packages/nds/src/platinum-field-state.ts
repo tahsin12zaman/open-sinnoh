@@ -1,9 +1,9 @@
 import {
   PLATINUM_FIELD_STATE_OFFSET,
   selectPlatinumSaveBlocks,
+  writePlatinumSave,
   type PlatinumLocation,
 } from './platinum-save.ts';
-
 
 const PLAYER_OFFSET = 0x00;
 const ENTRANCE_OFFSET = 0x14;
@@ -83,6 +83,81 @@ function validateLocation(
       `Invalid Platinum ${name} facing direction ${location.faceDirection}`,
     );
   }
+}
+
+function validateInteger(
+  name: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+): void {
+  if (
+    !Number.isInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error(
+      `Invalid Platinum ${name} value ${value}`,
+    );
+  }
+}
+
+function validateWritableLocation(
+  location: PlatinumLocation | null,
+  name: string,
+): void {
+  if (location === null) return;
+
+  validateInteger(
+    `${name} map header`,
+    location.mapHeaderId,
+    0,
+    0x7fffffff,
+  );
+  validateInteger(
+    `${name} warp ID`,
+    location.warpId,
+    -0x80000000,
+    0x7fffffff,
+  );
+  validateInteger(
+    `${name} x coordinate`,
+    location.x,
+    -0x80000000,
+    0x7fffffff,
+  );
+  validateInteger(
+    `${name} z coordinate`,
+    location.z,
+    -0x80000000,
+    0x7fffffff,
+  );
+  validateInteger(
+    `${name} facing direction`,
+    location.faceDirection,
+    0,
+    3,
+  );
+}
+
+function writeLocation(
+  view: DataView,
+  offset: number,
+  location: PlatinumLocation | null,
+): void {
+  const value = location ?? {
+    mapHeaderId: 0,
+    warpId: 0,
+    x: 0,
+    z: 0,
+    faceDirection: 0,
+  };
+
+  view.setInt32(offset, value.mapHeaderId, true);
+  view.setInt32(offset + 4, value.warpId, true);
+  view.setInt32(offset + 8, value.x, true);
+  view.setInt32(offset + 12, value.z, true);
+  view.setInt32(offset + 16, value.faceDirection, true);
 }
 
 export function readPlatinumFieldState(
@@ -177,4 +252,122 @@ export function readPlatinumFieldState(
       true,
     ),
   };
+}
+
+export function writePlatinumFieldState(
+  save: Uint8Array,
+  field: PlatinumFieldState,
+): Uint8Array {
+  validateWritableLocation(field.player, 'player');
+  validateWritableLocation(field.entrance, 'entrance');
+  validateWritableLocation(field.previous, 'previous');
+  validateWritableLocation(field.special, 'special');
+  validateWritableLocation(field.exit, 'exit');
+
+  validateInteger('BGM', field.bgm, 0, 0xffff);
+  validateInteger('weather', field.weather, 0, 0xffff);
+  validateInteger(
+    'blackout warp ID',
+    field.blackOutWarpId,
+    0,
+    0xffff,
+  );
+  validateInteger(
+    'camera type',
+    field.cameraType,
+    0,
+    0xff,
+  );
+  validateInteger(
+    'poison steps',
+    field.poisonSteps,
+    0,
+    0xffff,
+  );
+  validateInteger(
+    'Safari steps',
+    field.safariSteps,
+    0,
+    0xffff,
+  );
+  validateInteger(
+    'Safari Balls',
+    field.safariBalls,
+    0,
+    0xffff,
+  );
+
+  return writePlatinumSave(
+    save,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      const base = PLATINUM_FIELD_STATE_OFFSET;
+
+      writeLocation(
+        view,
+        base + PLAYER_OFFSET,
+        field.player,
+      );
+      writeLocation(
+        view,
+        base + ENTRANCE_OFFSET,
+        field.entrance,
+      );
+      writeLocation(
+        view,
+        base + PREVIOUS_OFFSET,
+        field.previous,
+      );
+      writeLocation(
+        view,
+        base + SPECIAL_OFFSET,
+        field.special,
+      );
+      writeLocation(
+        view,
+        base + EXIT_OFFSET,
+        field.exit,
+      );
+
+      view.setUint16(
+        base + BGM_OFFSET,
+        field.bgm,
+        true,
+      );
+      view.setUint16(
+        base + WEATHER_OFFSET,
+        field.weather,
+        true,
+      );
+      view.setUint16(
+        base + BLACKOUT_WARP_OFFSET,
+        field.blackOutWarpId,
+        true,
+      );
+      view.setUint8(
+        base + CAMERA_TYPE_OFFSET,
+        field.cameraType,
+      );
+      view.setUint16(
+        base + POISON_STEPS_OFFSET,
+        field.poisonSteps,
+        true,
+      );
+      view.setUint16(
+        base + SAFARI_STEPS_OFFSET,
+        field.safariSteps,
+        true,
+      );
+      view.setUint16(
+        base + SAFARI_BALLS_OFFSET,
+        field.safariBalls,
+        true,
+      );
+    },
+  );
 }

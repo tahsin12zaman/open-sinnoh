@@ -1,4 +1,7 @@
-import { selectPlatinumSaveBlocks } from './platinum-save.ts';
+import {
+  selectPlatinumSaveBlocks,
+  writePlatinumSave,
+} from './platinum-save.ts';
 
 export const PLATINUM_MISC_DATA_OFFSET = 0x20c4;
 
@@ -26,20 +29,42 @@ export interface PlatinumMiscData {
   tabletNameCodes: number[];
 }
 
+function validateInteger(
+  name: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+): void {
+  if (
+    !Number.isInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error(
+      `Invalid Platinum miscellaneous ${name} ${value}`,
+    );
+  }
+}
+
 export function readPlatinumMiscData(
   save: Uint8Array,
 ): PlatinumMiscData {
-  const { general } = selectPlatinumSaveBlocks(save);
+  const { general } =
+    selectPlatinumSaveBlocks(save);
 
   const base =
-    general.offset + PLATINUM_MISC_DATA_OFFSET;
+    general.offset +
+    PLATINUM_MISC_DATA_OFFSET;
 
   const minimumEnd =
     base +
     PLATINUM_TABLET_NAME_OFFSET +
     PLATINUM_TABLET_NAME_LENGTH * 2;
 
-  if (base < 0 || minimumEnd > save.length) {
+  if (
+    base < 0 ||
+    minimumEnd > save.length
+  ) {
     throw new Error(
       'Platinum MiscSaveBlock is outside the file',
     );
@@ -52,9 +77,14 @@ export function readPlatinumMiscData(
   );
 
   const featuresOffset =
-    base + PLATINUM_MAP_FEATURES_OFFSET;
+    base +
+    PLATINUM_MAP_FEATURES_OFFSET;
 
-  const id = view.getInt32(featuresOffset, true);
+  const id =
+    view.getInt32(
+      featuresOffset,
+      true,
+    );
 
   if (id < 0 || id > 10) {
     throw new Error(
@@ -72,9 +102,11 @@ export function readPlatinumMiscData(
           PLATINUM_MAP_FEATURES_BUFFER_SIZE,
       ),
     },
-
     tabletNameCodes: Array.from(
-      { length: PLATINUM_TABLET_NAME_LENGTH },
+      {
+        length:
+          PLATINUM_TABLET_NAME_LENGTH,
+      },
       (_, index) =>
         view.getUint16(
           base +
@@ -84,4 +116,90 @@ export function readPlatinumMiscData(
         ),
     ),
   };
+}
+
+export function writePlatinumMiscData(
+  save: Uint8Array,
+  misc: PlatinumMiscData,
+): Uint8Array {
+  validateInteger(
+    'map-features id',
+    misc.mapFeatures.id,
+    0,
+    10,
+  );
+
+  if (
+    !(
+      misc.mapFeatures.buffer
+      instanceof Uint8Array
+    ) ||
+    misc.mapFeatures.buffer.length !==
+      PLATINUM_MAP_FEATURES_BUFFER_SIZE
+  ) {
+    throw new Error(
+      `Invalid Platinum map-features buffer size ${misc.mapFeatures.buffer.length}`,
+    );
+  }
+
+  if (
+    misc.tabletNameCodes.length !==
+    PLATINUM_TABLET_NAME_LENGTH
+  ) {
+    throw new Error(
+      `Invalid Platinum tablet-name length ${misc.tabletNameCodes.length}`,
+    );
+  }
+
+  misc.tabletNameCodes.forEach(
+    (code, index) => {
+      validateInteger(
+        `tablet-name code ${index}`,
+        code,
+        0,
+        0xffff,
+      );
+    },
+  );
+
+  return writePlatinumSave(
+    save,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      const base =
+        PLATINUM_MISC_DATA_OFFSET;
+
+      const featuresOffset =
+        base +
+        PLATINUM_MAP_FEATURES_OFFSET;
+
+      view.setInt32(
+        featuresOffset,
+        misc.mapFeatures.id,
+        true,
+      );
+
+      general.set(
+        misc.mapFeatures.buffer,
+        featuresOffset + 4,
+      );
+
+      misc.tabletNameCodes.forEach(
+        (code, index) => {
+          view.setUint16(
+            base +
+              PLATINUM_TABLET_NAME_OFFSET +
+              index * 2,
+            code,
+            true,
+          );
+        },
+      );
+    },
+  );
 }

@@ -44,8 +44,10 @@ export const SECTIONS: readonly { id: SectionId; readonly label: string }[] = ([
  * file dialog.
  */
 export interface DataActions {
-  /** Downloads the last save. */
+  /** Downloads the last OpenSinnoh JSON save. */
   exportSave(): Promise<string>;
+  /** Downloads the last save converted to a genuine Platinum .sav. */
+  exportPlatinumSave(): Promise<string>;
   /** Asks for a save file and puts it in the game (in a game) or in the save slot (at the title), once `ask` says YES. */
   importSave(ask: (question: string) => Promise<boolean>): Promise<string>;
   /** The imported game's actions; null when the run has no imported ROM (dev packs). */
@@ -568,6 +570,7 @@ export const SETTINGS: readonly Setting[] = [
   },
   // DATA: the save file, the imported game, the optional HeartGold/SoulSilver follower art, and the mods.
   action('exportSave', () => S.options.exportSave, () => S.options.export, () => S.options.exportSaveText, (env) => env.data.exportSave(), { group: 'saves' }),
+  action('exportPlatinumSave', () => S.options.exportPlatinumSave, () => S.options.export, () => S.options.exportPlatinumSaveText, (env) => env.data.exportPlatinumSave(), { group: 'saves' }),
   action(
     'importSave',
     () => S.options.importSave,

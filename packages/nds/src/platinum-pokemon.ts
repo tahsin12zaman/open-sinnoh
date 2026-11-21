@@ -1,4 +1,7 @@
-import { selectPlatinumSaveBlocks } from './platinum-save.ts';
+import {
+  selectPlatinumSaveBlocks,
+  writePlatinumSave,
+} from './platinum-save.ts';
 
 export const PLATINUM_PARTY_OFFSET = 0x98;
 export const PLATINUM_PARTY_CAPACITY = 6;
@@ -54,6 +57,15 @@ const BLOCK_ORDERS: readonly (readonly [
 
 export interface DecodedPlatinumPartyPokemon {
   personality: number;
+  /**
+   * The two-byte Pokémon sanity field. Older callers that did not
+   * preserve it may omit it, in which case encoding writes zero.
+   */
+  sanity?: number;
+  /**
+   * Checksum read from the encoded record. Encoding always
+   * recalculates this value from the supplied logical blocks.
+   */
   checksum: number;
   blocks: [
     Uint8Array,
@@ -70,13 +82,32 @@ export interface DecodedPlatinumParty {
   pokemon: DecodedPlatinumPartyPokemon[];
 }
 
+function validateInteger(
+  name: string,
+  value: number,
+  minimum: number,
+  maximum: number,
+): void {
+  if (
+    !Number.isInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error(
+      `Invalid Platinum Pokémon ${name} ${value}`,
+    );
+  }
+}
+
 function copyRange(
   bytes: Uint8Array,
   offset: number,
   size: number,
 ): Uint8Array {
   if (offset < 0 || offset + size > bytes.length) {
-    throw new Error('Platinum Pokémon data is outside the file');
+    throw new Error(
+      'Platinum Pokémon data is outside the file',
+    );
   }
 
   return bytes.slice(offset, offset + size);
@@ -105,7 +136,11 @@ export function cryptPlatinumPokemonData(
 
   let state = seed >>> 0;
 
-  for (let offset = 0; offset < output.length; offset += 2) {
+  for (
+    let offset = 0;
+    offset < output.length;
+    offset += 2
+  ) {
     state =
       (Math.imul(state, LCRNG_MULTIPLIER) +
         LCRNG_INCREMENT) >>>
@@ -140,9 +175,15 @@ export function platinumPokemonChecksum(
 
   let checksum = 0;
 
-  for (let offset = 0; offset < bytes.length; offset += 2) {
+  for (
+    let offset = 0;
+    offset < bytes.length;
+    offset += 2
+  ) {
     checksum =
-      (checksum + view.getUint16(offset, true)) & 0xffff;
+      (checksum +
+        view.getUint16(offset, true)) &
+      0xffff;
   }
 
   return checksum;
@@ -151,13 +192,62 @@ export function platinumPokemonChecksum(
 export function platinumPokemonBlockOrder(
   personality: number,
 ): readonly [number, number, number, number] {
-  let index = (personality & 0x3e000) >>> 13;
+  let index =
+    (personality & 0x3e000) >>> 13;
 
   if (index >= 24) {
     index -= 24;
   }
 
   return BLOCK_ORDERS[index]!;
+}
+
+function validatePokemon(
+  pokemon: DecodedPlatinumPartyPokemon,
+): void {
+  validateInteger(
+    'personality',
+    pokemon.personality,
+    0,
+    0xffffffff,
+  );
+
+  validateInteger(
+    'sanity',
+    pokemon.sanity ?? 0,
+    0,
+    0xffff,
+  );
+
+  if (pokemon.blocks.length !== 4) {
+    throw new Error(
+      `Invalid Platinum Pokémon block count ${pokemon.blocks.length}`,
+    );
+  }
+
+  pokemon.blocks.forEach(
+    (block, index) => {
+      if (
+        !(block instanceof Uint8Array) ||
+        block.length !==
+          PLATINUM_DATA_BLOCK_SIZE
+      ) {
+        throw new Error(
+          `Invalid Platinum Pokémon block ${index} size ${block.length}`,
+        );
+      }
+    },
+  );
+
+  if (
+    !(pokemon.partyData instanceof Uint8Array) ||
+    pokemon.partyData.length !==
+      PLATINUM_PARTY_DATA_SIZE
+  ) {
+    throw new Error(
+      `Invalid Platinum Pokémon party-data size ${pokemon.partyData.length}`,
+    );
+  }
 }
 
 export function decodePlatinumPartyPokemon(
@@ -176,18 +266,24 @@ export function decodePlatinumPartyPokemon(
     record.byteLength,
   );
 
-  const personality = view.getUint32(0, true);
-  const checksum = view.getUint16(6, true);
+  const personality =
+    view.getUint32(0, true);
+  const sanity =
+    view.getUint16(4, true);
+  const checksum =
+    view.getUint16(6, true);
 
   const encryptedBlocks = record.slice(
     PLATINUM_BOX_DATA_OFFSET,
-    PLATINUM_BOX_DATA_OFFSET + PLATINUM_BOX_DATA_SIZE,
+    PLATINUM_BOX_DATA_OFFSET +
+      PLATINUM_BOX_DATA_SIZE,
   );
 
-  const decryptedBlocks = cryptPlatinumPokemonData(
-    encryptedBlocks,
-    checksum,
-  );
+  const decryptedBlocks =
+    cryptPlatinumPokemonData(
+      encryptedBlocks,
+      checksum,
+    );
 
   const actualChecksum =
     platinumPokemonChecksum(decryptedBlocks);
@@ -204,18 +300,23 @@ export function decodePlatinumPartyPokemon(
       PLATINUM_PARTY_DATA_SIZE,
   );
 
-  const partyData = cryptPlatinumPokemonData(
-    encryptedPartyData,
-    personality,
-  );
+  const partyData =
+    cryptPlatinumPokemonData(
+      encryptedPartyData,
+      personality,
+    );
 
-  const order = platinumPokemonBlockOrder(personality);
+  const order =
+    platinumPokemonBlockOrder(personality);
 
-  const blocks = order.map((physicalIndex) =>
-    decryptedBlocks.slice(
-      physicalIndex * PLATINUM_DATA_BLOCK_SIZE,
-      (physicalIndex + 1) * PLATINUM_DATA_BLOCK_SIZE,
-    ),
+  const blocks = order.map(
+    (physicalIndex) =>
+      decryptedBlocks.slice(
+        physicalIndex *
+          PLATINUM_DATA_BLOCK_SIZE,
+        (physicalIndex + 1) *
+          PLATINUM_DATA_BLOCK_SIZE,
+      ),
   ) as [
     Uint8Array,
     Uint8Array,
@@ -225,16 +326,99 @@ export function decodePlatinumPartyPokemon(
 
   return {
     personality,
+    sanity,
     checksum,
     blocks,
     partyData,
   };
 }
 
+export function encodePlatinumPartyPokemon(
+  pokemon: DecodedPlatinumPartyPokemon,
+): Uint8Array {
+  validatePokemon(pokemon);
+
+  const physicalBlocks =
+    new Uint8Array(
+      PLATINUM_BOX_DATA_SIZE,
+    );
+
+  const order =
+    platinumPokemonBlockOrder(
+      pokemon.personality,
+    );
+
+  pokemon.blocks.forEach(
+    (block, logicalIndex) => {
+      const physicalIndex =
+        order[logicalIndex]!;
+
+      physicalBlocks.set(
+        block,
+        physicalIndex *
+          PLATINUM_DATA_BLOCK_SIZE,
+      );
+    },
+  );
+
+  const checksum =
+    platinumPokemonChecksum(physicalBlocks);
+
+  const encryptedBlocks =
+    cryptPlatinumPokemonData(
+      physicalBlocks,
+      checksum,
+    );
+
+  const encryptedPartyData =
+    cryptPlatinumPokemonData(
+      pokemon.partyData,
+      pokemon.personality,
+    );
+
+  const record = new Uint8Array(
+    PLATINUM_PARTY_POKEMON_SIZE,
+  );
+
+  const view = new DataView(
+    record.buffer,
+    record.byteOffset,
+    record.byteLength,
+  );
+
+  view.setUint32(
+    0,
+    pokemon.personality,
+    true,
+  );
+  view.setUint16(
+    4,
+    pokemon.sanity ?? 0,
+    true,
+  );
+  view.setUint16(
+    6,
+    checksum,
+    true,
+  );
+
+  record.set(
+    encryptedBlocks,
+    PLATINUM_BOX_DATA_OFFSET,
+  );
+  record.set(
+    encryptedPartyData,
+    PLATINUM_PARTY_DATA_OFFSET,
+  );
+
+  return record;
+}
+
 export function readPlatinumParty(
   bytes: Uint8Array,
 ): DecodedPlatinumParty {
-  const { general } = selectPlatinumSaveBlocks(bytes);
+  const { general } =
+    selectPlatinumSaveBlocks(bytes);
   const base = general.offset;
 
   const view = new DataView(
@@ -253,14 +437,18 @@ export function readPlatinumParty(
     true,
   );
 
-  if (capacity !== PLATINUM_PARTY_CAPACITY) {
+  if (
+    capacity !== PLATINUM_PARTY_CAPACITY
+  ) {
     throw new Error(
       `Invalid Platinum party capacity ${capacity}`,
     );
   }
 
   if (count < 0 || count > capacity) {
-    throw new Error(`Invalid Platinum party count ${count}`);
+    throw new Error(
+      `Invalid Platinum party count ${count}`,
+    );
   }
 
   const pokemon = Array.from(
@@ -270,7 +458,8 @@ export function readPlatinumParty(
         bytes,
         base +
           PLATINUM_PARTY_POKEMON_OFFSET +
-          index * PLATINUM_PARTY_POKEMON_SIZE,
+          index *
+            PLATINUM_PARTY_POKEMON_SIZE,
       ),
   );
 
@@ -279,4 +468,84 @@ export function readPlatinumParty(
     count,
     pokemon,
   };
+}
+
+export function writePlatinumParty(
+  bytes: Uint8Array,
+  party: DecodedPlatinumParty,
+): Uint8Array {
+  if (
+    party.capacity !==
+    PLATINUM_PARTY_CAPACITY
+  ) {
+    throw new Error(
+      `Invalid Platinum party capacity ${party.capacity}`,
+    );
+  }
+
+  if (
+    !Number.isInteger(party.count) ||
+    party.count < 0 ||
+    party.count > party.capacity
+  ) {
+    throw new Error(
+      `Invalid Platinum party count ${party.count}`,
+    );
+  }
+
+  if (party.pokemon.length !== party.count) {
+    throw new Error(
+      `Platinum party count ${party.count} does not match ${party.pokemon.length} Pokémon`,
+    );
+  }
+
+  const records = party.pokemon.map(
+    encodePlatinumPartyPokemon,
+  );
+
+  return writePlatinumSave(
+    bytes,
+    ({ general }) => {
+      const view = new DataView(
+        general.buffer,
+        general.byteOffset,
+        general.byteLength,
+      );
+
+      view.setInt32(
+        PLATINUM_PARTY_OFFSET,
+        PLATINUM_PARTY_CAPACITY,
+        true,
+      );
+      view.setInt32(
+        PLATINUM_PARTY_OFFSET + 4,
+        party.count,
+        true,
+      );
+
+      const recordsStart =
+        PLATINUM_PARTY_POKEMON_OFFSET;
+      const recordsEnd =
+        recordsStart +
+        PLATINUM_PARTY_CAPACITY *
+          PLATINUM_PARTY_POKEMON_SIZE;
+
+      general.fill(
+        0,
+        recordsStart,
+        recordsEnd,
+      );
+
+      records.forEach(
+        (record, index) => {
+          general.set(
+            record,
+            recordsStart +
+              index *
+                PLATINUM_PARTY_POKEMON_SIZE,
+          );
+        },
+      );
+    },
+  );
 }

@@ -46,6 +46,67 @@ export function decodePlatinumName(
     .join('');
 }
 
+export function encodePlatinumName(
+  name: string,
+  length: number,
+): number[] {
+  if (
+    !Number.isInteger(length) ||
+    length < 0
+  ) {
+    throw new Error(
+      `Invalid Platinum name length ${length}`,
+    );
+  }
+
+  const characters = [...name];
+
+  if (characters.length > length) {
+    throw new Error(
+      `Platinum name ${JSON.stringify(name)} exceeds ${length} characters`,
+    );
+  }
+
+  const codesByCharacter =
+    new Map<string, number>();
+
+  for (
+    const [code, character] of CHARS
+  ) {
+    if (
+      !codesByCharacter.has(character)
+    ) {
+      codesByCharacter.set(
+        character,
+        code,
+      );
+    }
+  }
+
+  const codes = characters.map(
+    (character) => {
+      const code =
+        codesByCharacter.get(
+          character,
+        );
+
+      if (code === undefined) {
+        throw new Error(
+          `Character ${JSON.stringify(character)} cannot be encoded in a Platinum name`,
+        );
+      }
+
+      return code;
+    },
+  );
+
+  while (codes.length < length) {
+    codes.push(0xffff);
+  }
+
+  return codes;
+}
+
 export function convertPlatinumTrainerData(
   data: PlatinumTrainerData,
 ): ImportedPlatinumTrainer {

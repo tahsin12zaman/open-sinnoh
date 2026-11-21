@@ -13,6 +13,7 @@ import {
   PLATINUM_BADGES_OFFSET,
   PLATINUM_PLAYER_DATA_OFFSET,
   readPlatinumPlayerState,
+  writePlatinumPlayerState,
 } from './platinum-player-state.ts';
 
 function makeBlock(
@@ -127,6 +128,62 @@ describe('Platinum player state', () => {
       runningShoes: true,
       playerState: 2,
     });
+  });
+
+  it('round-trips player state', () => {
+    const save = new Uint8Array(
+      PLATINUM_SAVE_SIZE,
+    );
+    const [primary, backup] =
+      PLATINUM_SAVE_COPY_OFFSETS;
+
+    writeBlock(
+      save,
+      primary,
+      PLATINUM_GENERAL_BLOCK,
+      21,
+      1,
+    );
+    writeBlock(
+      save,
+      backup,
+      PLATINUM_GENERAL_BLOCK,
+      21,
+      2,
+    );
+    writeBlock(
+      save,
+      primary,
+      PLATINUM_STORAGE_BLOCK,
+      21,
+      1,
+    );
+    writeBlock(
+      save,
+      backup,
+      PLATINUM_STORAGE_BLOCK,
+      21,
+      2,
+    );
+
+    const player = {
+      badgeBits: 0b11001010,
+      cyclingGear: 1,
+      runningShoes: true,
+      playerState: 2,
+    };
+
+    const original = save.slice();
+    const written =
+      writePlatinumPlayerState(
+        save,
+        player,
+      );
+
+    expect(save).toEqual(original);
+    expect(
+      readPlatinumPlayerState(written),
+    ).toEqual(player);
   });
 
   it.skipIf(!process.env.OPENSINNOH_NDS_SAV)(

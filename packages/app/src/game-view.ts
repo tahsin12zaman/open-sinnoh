@@ -5,7 +5,10 @@
 import { BUTTONS, DEFAULT_CLOCK, type Button, type ClockTime } from '@opensinnoh/core';
 import { DEFAULT_DEVICE_OPTIONS, PANEL_HEIGHT, PANEL_WIDTH, type GameState, type InputFrame, type SaveEnvelope } from '@opensinnoh/contracts';
 import { IndexedDbSaveStore, PackMismatchError, saveFromJson, saveToJson, TEXT_FRAME_DELAY, validateSave, type Game, type NewGameOptions, type TextSpeedOption } from '@opensinnoh/game';
-import { importPlatinumSaveState } from '@opensinnoh/importer';
+import {
+  exportPlatinumSaveState,
+  importPlatinumSaveState,
+} from '@opensinnoh/importer';
 import { checkNewGame, readNewGame, storeNewGame } from './new-game.ts';
 import { createSession, warmBattleEngine, type Session } from './boot.ts';
 import { parseEnhanced, setEnhancedVisuals, visualStyleConfig, type EnhancedConfig } from '@opensinnoh/render';
@@ -76,6 +79,8 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const SAVE_SLOT = 'main';
 /** Its own database: the app's `lantern-nds` database holds the imported packs. */
 const SAVES_DB = 'lantern-nds-saves'; // pre-rename name, kept: players' stored data uses it
+const PLATINUM_BASES_DB =
+  'opensinnoh-platinum-save-bases';
 const MAX_SAVE_FILE = 2 * 1024 * 1024;
 /** The longest the loop holds the game for the battle's art before it stops with an error. */
 const HOLD_LIMIT_MS = 5000;
@@ -167,6 +172,10 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     }
   };
   const saves = new IndexedDbSaveStore(SAVES_DB);
+  const platinumBases =
+    new IndexedDbSaveStore(
+      PLATINUM_BASES_DB,
+    );
   // The suspend point (suspend.ts): kept when the page hides, outside the title; never in replays.
   const suspend = createSuspend({ game: () => session.game, store: saves, on: () => !opts.replay && suspendOn() });
   // The device: stored options and the save slot the start menu's SAVE writes (a failed write is shown).
@@ -875,8 +884,8 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
   }
 
   // OPTIONS > DATA (ui/settings.ts): the save file, the imported game and its HGSS add-on, and the mods.
-  const download = (name: string, text: string, type: string) => {
-    const url = URL.createObjectURL(new Blob([text], { type }));
+  const download = (name: string, data: BlobPart, type: string) => {
+    const url = URL.createObjectURL(new Blob([data], { type }));
     Object.assign(document.createElement('a'), { href: url, download: name }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -928,6 +937,41 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
       download(`opensinnoh-save-${new Date().toISOString().slice(0, 10)}.json`, json, 'application/json');
       return S.game.exported;
     },
+    async exportPlatinumSave() {
+      const json = await saves.get(SAVE_SLOT);
+      if (json === undefined) {
+        throw new Error(S.game.saveFirst);
+      }
+
+      const base =
+        await platinumBases.getBytes(
+          SAVE_SLOT,
+        );
+
+      if (base === undefined) {
+        throw new Error(
+          S.game.platinumBaseMissing,
+        );
+      }
+
+      const envelope =
+        saveFromJson(json) as SaveEnvelope;
+
+      const exported =
+        exportPlatinumSaveState(
+          envelope.state,
+          base,
+          session.game.registries,
+        );
+
+      download(
+        `opensinnoh-platinum-${new Date().toISOString().slice(0, 10)}.sav`,
+        exported.slice().buffer as ArrayBuffer,
+        'application/octet-stream',
+      );
+
+      return S.game.exported;
+    },
     async importSave(ask) {
       const file = await pickFile(
         '.json,.sav,application/json,application/octet-stream',
@@ -958,14 +1002,18 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
       }
 
       let text: string;
+      let platinumBase:
+        Uint8Array | undefined;
 
       try {
         if (platinum) {
+          platinumBase = new Uint8Array(
+            await file.arrayBuffer(),
+          );
+
           const state = importPlatinumSaveState(
             session.game.state,
-            new Uint8Array(
-              await file.arrayBuffer(),
-            ),
+            platinumBase,
             session.game.registries,
           );
 
@@ -986,6 +1034,17 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
         throw new Error(
           saveImportMessage(e),
           { cause: e },
+        );
+      }
+
+      if (platinumBase !== undefined) {
+        await platinumBases.putBytes(
+          SAVE_SLOT,
+          platinumBase,
+        );
+      } else {
+        await platinumBases.remove(
+          SAVE_SLOT,
         );
       }
 

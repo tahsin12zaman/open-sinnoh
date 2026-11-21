@@ -1,13 +1,85 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  crc16Ccitt,
+  PLATINUM_GENERAL_BLOCK,
+  PLATINUM_SAVE_COPY_OFFSETS,
+  PLATINUM_SAVE_FOOTER_SIZE,
+  PLATINUM_SAVE_SIGNATURE,
+  PLATINUM_SAVE_SIZE,
+  PLATINUM_STORAGE_BLOCK,
+} from './platinum-save.ts';
+import {
+  encodePlatinumVarsFlags,
   parsePlatinumVarsFlags,
   PLATINUM_FLAGS_COUNT,
   PLATINUM_FLAGS_SIZE,
   PLATINUM_VARS_COUNT,
   PLATINUM_VARS_START,
   readPlatinumVarsFlags,
+  writePlatinumVarsFlags,
 } from './platinum-vars-flags.ts';
+
+function varsFlagsSave(): Uint8Array {
+  const save = new Uint8Array(
+    PLATINUM_SAVE_SIZE,
+  );
+  const [primary, backup] =
+    PLATINUM_SAVE_COPY_OFFSETS;
+
+  for (const copy of [primary, backup]) {
+    const counter =
+      copy === primary ? 1 : 2;
+
+    for (const specification of [
+      PLATINUM_GENERAL_BLOCK,
+      PLATINUM_STORAGE_BLOCK,
+    ]) {
+      const block = new Uint8Array(
+        specification.size,
+      );
+      const footer =
+        specification.size -
+        PLATINUM_SAVE_FOOTER_SIZE;
+      const view = new DataView(
+        block.buffer,
+      );
+
+      view.setUint32(footer, 70, true);
+      view.setUint32(
+        footer + 4,
+        counter,
+        true,
+      );
+      view.setUint32(
+        footer + 8,
+        specification.size,
+        true,
+      );
+      view.setUint32(
+        footer + 12,
+        PLATINUM_SAVE_SIGNATURE,
+        true,
+      );
+      view.setUint8(
+        footer + 16,
+        specification.blockId,
+      );
+      view.setUint16(
+        footer + 18,
+        crc16Ccitt(block, 0, footer),
+        true,
+      );
+
+      save.set(
+        block,
+        copy + specification.offset,
+      );
+    }
+  }
+
+  return save;
+}
 
 describe('Platinum variables and flags', () => {
   it('parses native variables and flag bits', () => {
@@ -86,4 +158,91 @@ describe('Platinum variables and flags', () => {
       }
     },
   );
+
+  it('encodes and round-trips all variables and flags', () => {
+    const vars = Array<number>(
+      PLATINUM_VARS_COUNT,
+    ).fill(0);
+
+    vars[0] = 123;
+    vars[1] = 456;
+    vars[PLATINUM_VARS_COUNT - 1] =
+      0xffff;
+
+    const data = {
+      vars,
+      flags: [
+        1,
+        7,
+        8,
+        100,
+        2911,
+        100,
+      ],
+    };
+
+    const raw = new Uint8Array(
+      PLATINUM_VARS_COUNT * 2 +
+        PLATINUM_FLAGS_SIZE,
+    );
+
+    raw[PLATINUM_VARS_COUNT * 2] = 1;
+
+    encodePlatinumVarsFlags(raw, data);
+
+    expect(
+      parsePlatinumVarsFlags(raw),
+    ).toEqual({
+      vars,
+      flags: [1, 7, 8, 100, 2911],
+    });
+
+    expect(
+      raw[PLATINUM_VARS_COUNT * 2]! & 1,
+    ).toBe(1);
+
+    const save = varsFlagsSave();
+    const original = save.slice();
+
+    const written =
+      writePlatinumVarsFlags(
+        save,
+        data,
+      );
+
+    expect(save).toEqual(original);
+    expect(
+      readPlatinumVarsFlags(written),
+    ).toEqual({
+      vars,
+      flags: [1, 7, 8, 100, 2911],
+    });
+  });
+
+  it('rejects invalid variables and flags', () => {
+    const vars = Array<number>(
+      PLATINUM_VARS_COUNT,
+    ).fill(0);
+
+    expect(() =>
+      writePlatinumVarsFlags(
+        varsFlagsSave(),
+        {
+          vars: vars.slice(1),
+          flags: [],
+        },
+      ),
+    ).toThrow(/variable count/i);
+
+    expect(() =>
+      writePlatinumVarsFlags(
+        varsFlagsSave(),
+        {
+          vars,
+          flags: [PLATINUM_FLAGS_COUNT],
+        },
+      ),
+    ).toThrow(/flag ID/i);
+  });
+
 });

@@ -1,9 +1,81 @@
 import { readFileSync } from 'node:fs';
+import {
+  crc16Ccitt,
+  PLATINUM_GENERAL_BLOCK,
+  PLATINUM_SAVE_COPY_OFFSETS,
+  PLATINUM_SAVE_FOOTER_SIZE,
+  PLATINUM_SAVE_SIGNATURE,
+  PLATINUM_SAVE_SIZE,
+  PLATINUM_STORAGE_BLOCK,
+} from './platinum-save.ts';
 import { describe, expect, it } from 'vitest';
 import {
   decodePlatinumOptions,
+  encodePlatinumOptions,
   readPlatinumOptions,
+  writePlatinumOptions,
 } from './platinum-options.ts';
+
+function optionsSave(): Uint8Array {
+  const save = new Uint8Array(
+    PLATINUM_SAVE_SIZE,
+  );
+  const [primary, backup] =
+    PLATINUM_SAVE_COPY_OFFSETS;
+
+  for (const copy of [primary, backup]) {
+    const counter =
+      copy === primary ? 1 : 2;
+
+    for (const specification of [
+      PLATINUM_GENERAL_BLOCK,
+      PLATINUM_STORAGE_BLOCK,
+    ]) {
+      const block = new Uint8Array(
+        specification.size,
+      );
+      const footer =
+        specification.size -
+        PLATINUM_SAVE_FOOTER_SIZE;
+      const view = new DataView(
+        block.buffer,
+      );
+
+      view.setUint32(footer, 60, true);
+      view.setUint32(
+        footer + 4,
+        counter,
+        true,
+      );
+      view.setUint32(
+        footer + 8,
+        specification.size,
+        true,
+      );
+      view.setUint32(
+        footer + 12,
+        PLATINUM_SAVE_SIGNATURE,
+        true,
+      );
+      view.setUint8(
+        footer + 16,
+        specification.blockId,
+      );
+      view.setUint16(
+        footer + 18,
+        crc16Ccitt(block, 0, footer),
+        true,
+      );
+
+      save.set(
+        block,
+        copy + specification.offset,
+      );
+    }
+  }
+
+  return save;
+}
 
 const savePath = process.env.OPENSINNOH_NDS_SAV;
 
@@ -70,4 +142,34 @@ describe('Platinum options', () => {
       expect(options.frame).toBeLessThanOrEqual(19);
     },
   );
+
+  it('encodes and round-trips options', () => {
+    const options = {
+      textSpeed: 2,
+      soundMode: 1,
+      battleStyle: 1,
+      battleScene: 0,
+      buttonMode: 2,
+      frame: 19,
+    };
+
+    expect(
+      decodePlatinumOptions(
+        encodePlatinumOptions(options),
+      ),
+    ).toEqual(options);
+
+    const save = optionsSave();
+    const original = save.slice();
+    const written = writePlatinumOptions(
+      save,
+      options,
+    );
+
+    expect(save).toEqual(original);
+    expect(
+      readPlatinumOptions(written),
+    ).toEqual(options);
+  });
+
 });
