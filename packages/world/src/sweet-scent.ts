@@ -10,6 +10,9 @@
  *
  * The DS's palette-blend variant in weather 23 and the palette mask in weather 8 change only how the pink is drawn.
  */
+import type {
+  RuntimeSweetScentTaskSnapshot,
+} from '@opensinnoh/contracts';
 import type { HmCutIn } from './hm-cut-in.ts';
 
 /** ov5_021F0438: the weathers (`sourceIndex`) in which the scent does nothing. */
@@ -43,6 +46,28 @@ export class SweetScentTask {
 
   constructor(private readonly h: SweetScentHost) {
     if (!h.cutIn) this.phase = 'check';
+  }
+
+  capture(): RuntimeSweetScentTaskSnapshot {
+    return {
+      kind: 'sweet-scent',
+      phase: this.phase,
+      blend: { ...this.blend },
+      wait: this.wait,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimeSweetScentTaskSnapshot,
+    host: SweetScentHost,
+  ): SweetScentTask {
+    const task = new SweetScentTask(host);
+
+    task.phase = snapshot.phase;
+    task.blend = { ...snapshot.blend };
+    task.wait = snapshot.wait;
+
+    return task;
   }
 
   /** The pink's alpha now (0 when none). */

@@ -54,3 +54,27 @@ export interface RuntimeFishingTaskSnapshot {
   ticks: number;
   caught: boolean;
 }
+
+export interface RuntimeHmCutInSnapshot {
+  kind: 'hm-cut-in';
+  elapsed: number;
+}
+
+export interface RuntimeSweetScentTaskSnapshot {
+  kind: 'sweet-scent';
+  phase:
+    | 'cut-in'
+    | 'check'
+    | 'in'
+    | 'hold'
+    | 'out'
+    | 'fail';
+  blend: {
+    from: number;
+    span: number;
+    steps: number;
+    at: number;
+    value: number;
+  };
+  wait: number;
+}

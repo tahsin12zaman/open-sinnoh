@@ -1,4 +1,8 @@
-import type { AudioHost, FlySceneView } from '@opensinnoh/contracts';
+import type {
+  AudioHost,
+  FlySceneView,
+  RuntimeHmCutInSnapshot,
+} from '@opensinnoh/contracts';
 import type { Pokemon } from '@opensinnoh/core';
 import { FlyCutIn } from './fly.ts';
 
@@ -14,16 +18,72 @@ const flyOnly = (name: string) => () => {
 
 export class HmCutIn {
   private readonly scene: FlyCutIn;
+  private elapsed = 0;
+  private quiet = false;
   constructor(
     readonly mon: Pokemon,
     audio: AudioHost,
   ) {
-    this.scene = new FlyCutIn({ cry: () => audio.playCry(mon.species, mon.form), se: flyOnly('se'), fadeOut: flyOnly('fadeOut'), fadeIn: flyOnly('fadeIn'), fadeDone: flyOnly('fadeDone'), hidePlayer: flyOnly('hidePlayer') }, false);
+    this.scene = new FlyCutIn(
+      {
+        cry: () => {
+          if (!this.quiet) {
+            audio.playCry(mon.species, mon.form);
+          }
+        },
+        se: flyOnly('se'),
+        fadeOut: flyOnly('fadeOut'),
+        fadeIn: flyOnly('fadeIn'),
+        fadeDone: flyOnly('fadeDone'),
+        hidePlayer: flyOnly('hidePlayer'),
+      },
+      false,
+    );
+  }
+
+  capture(): RuntimeHmCutInSnapshot {
+    return {
+      kind: 'hm-cut-in',
+      elapsed: this.elapsed,
+    };
+  }
+
+  static restore(
+    mon: Pokemon,
+    audio: AudioHost,
+    snapshot: RuntimeHmCutInSnapshot,
+  ): HmCutIn {
+    if (
+      !Number.isInteger(snapshot.elapsed) ||
+      snapshot.elapsed < 0 ||
+      snapshot.elapsed > HM_CUT_IN_TICKS
+    ) {
+      throw new Error(
+        `invalid HM cut-in elapsed ${snapshot.elapsed}`,
+      );
+    }
+
+    const cutIn = new HmCutIn(mon, audio);
+
+    cutIn.quiet = true;
+
+    for (
+      let tick = 0;
+      tick < snapshot.elapsed;
+      tick++
+    ) {
+      cutIn.step();
+    }
+
+    cutIn.quiet = false;
+
+    return cutIn;
   }
 
   /** One 30 Hz tick; true once the cut-in has finished. */
   step(): boolean {
     this.scene.tick();
+    this.elapsed++;
     return this.scene.finished;
   }
 
