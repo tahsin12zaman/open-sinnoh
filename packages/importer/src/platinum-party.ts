@@ -1,8 +1,8 @@
+import type { GameState } from '@opensinnoh/contracts';
 import type {
-  GameState,
   Pokemon,
   StatusCondition,
-} from '@opensinnoh/contracts';
+} from '@opensinnoh/core';
 import {
   parsePlatinumPartyPokemon,
   readPlatinumParty,
@@ -60,6 +60,58 @@ function platinumDate(
     month.toString().padStart(2, '0'),
     day.toString().padStart(2, '0'),
   ].join('-');
+}
+
+/**
+ * Converts Platinum's three stored ribbon bitfields to indexes in
+ * generated/ribbons.txt, which is also the order used by
+ * OpenSinnoh's NewGame.ribbons table.
+ *
+ * gba:
+ *   Ribbon IDs 0–31.
+ *
+ * ds1 bit 0:
+ *   Ribbon ID 32, the Sinnoh Champion Ribbon.
+ *
+ * ds2 bits 0–19:
+ *   Ribbon IDs 33–52, the Sinnoh Contest Ribbons.
+ *
+ * ds1 bits 1–27:
+ *   Ribbon IDs 53–79, the remaining Sinnoh and special Ribbons.
+ *
+ * Other bits are unused native padding.
+ */
+export function platinumRibbons(
+  ribbons: PlatinumPartyPokemonData['ribbons'],
+): number[] {
+  const result: number[] = [];
+
+  for (let bit = 0; bit < 32; bit++) {
+    if (((ribbons.gba >>> bit) & 1) !== 0) {
+      result.push(bit);
+    }
+  }
+
+  if ((ribbons.ds1 & 1) !== 0) {
+    result.push(32);
+  }
+
+  for (let bit = 0; bit < 20; bit++) {
+    if (
+      ((ribbons.ds2 >> BigInt(bit)) & 1n) !==
+      0n
+    ) {
+      result.push(33 + bit);
+    }
+  }
+
+  for (let bit = 1; bit <= 27; bit++) {
+    if (((ribbons.ds1 >>> bit) & 1) !== 0) {
+      result.push(52 + bit);
+    }
+  }
+
+  return result.sort((a, b) => a - b);
 }
 
 export function convertPlatinumPartyPokemon(
@@ -131,10 +183,7 @@ export function convertPlatinumPartyPokemon(
         : {}),
     },
     markings: data.markings,
-
-    // Native ribbon bits are parsed but will be mapped to
-    // OpenSinnoh ribbon indexes in a later checkpoint.
-    ribbons: [],
+    ribbons: platinumRibbons(data.ribbons),
 
     ...(data.fatefulEncounter
       ? { fatefulEncounter: true as const }

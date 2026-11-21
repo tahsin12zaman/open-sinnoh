@@ -1,26 +1,44 @@
 import { readFileSync } from 'node:fs';
 import type {
-  Flag,
   GameState,
-  Var,
+  Registries,
 } from '@opensinnoh/contracts';
-import type { Id, PackData } from '@opensinnoh/core';
-import { beforeAll, describe, expect, it } from 'vitest';
+import type {
+  Id,
+  PackData,
+} from '@opensinnoh/core';
+import {
+  beforeAll,
+  describe,
+  expect,
+  it,
+} from 'vitest';
 import { importPlatinum } from './platinum.ts';
 import { importPlatinumSaveState } from './platinum-save-state.ts';
 
 const romPath = process.env.OPENSINNOH_NDS_ROM;
 const savePath = process.env.OPENSINNOH_NDS_SAV;
 
-function registry<T extends { id: Id }>(
+function registriesOf(
   pack: PackData,
-  name: string,
-): Map<Id, T> {
-  return new Map(
-    (
-      (pack.registries[name] ?? []) as unknown as T[]
-    ).map((record) => [record.id, record]),
-  );
+): Registries {
+  return Object.fromEntries(
+    Object.entries(pack.registries).map(
+      ([name, records]) => [
+        name,
+        new Map(
+          (
+            records as unknown as {
+              id: Id;
+            }[]
+          ).map((record) => [
+            record.id,
+            record,
+          ]),
+        ),
+      ],
+    ),
+  ) as unknown as Registries;
 }
 
 function makeBaseState(): GameState {
@@ -46,22 +64,25 @@ function makeBaseState(): GameState {
       facing: 'up',
     },
     party: [],
+    boxes: [],
+    currentBox: 0,
     flags: {},
     vars: {},
-  } as GameState;
+  } as unknown as GameState;
 }
 
 describe.skipIf(!romPath || !savePath)(
   'Platinum save progress with ROM registries',
   () => {
-    let pack: PackData;
+    let registries: Registries;
 
     beforeAll(async () => {
       const rom = new Uint8Array(
         readFileSync(romPath!),
       );
 
-      ({ pack } = await importPlatinum(rom));
+      const { pack } = await importPlatinum(rom);
+      registries = registriesOf(pack);
     });
 
     it('maps native progress to real OpenSinnoh IDs', () => {
@@ -69,20 +90,19 @@ describe.skipIf(!romPath || !savePath)(
         readFileSync(savePath!),
       );
 
-      const flags = registry<Flag>(pack, 'flags');
-      const vars = registry<Var>(pack, 'vars');
-
       const imported = importPlatinumSaveState(
         makeBaseState(),
         save,
-        {
-          flags,
-          vars,
-        },
+        registries,
       );
 
-      const flagEntries = Object.entries(imported.flags);
-      const varEntries = Object.entries(imported.vars);
+      const flagEntries = Object.entries(
+        imported.flags,
+      );
+
+      const varEntries = Object.entries(
+        imported.vars,
+      );
 
       console.log('mapped progress:', {
         flagOverrides: flagEntries.length,
@@ -91,8 +111,13 @@ describe.skipIf(!romPath || !savePath)(
         firstVariables: varEntries.slice(0, 20),
       });
 
-      expect(flagEntries.length).toBeGreaterThan(0);
-      expect(varEntries.length).toBeGreaterThan(0);
+      expect(
+        flagEntries.length,
+      ).toBeGreaterThan(0);
+
+      expect(
+        varEntries.length,
+      ).toBeGreaterThan(0);
 
       for (const [id] of flagEntries) {
         expect(id).toMatch(/^platinum:/);
@@ -103,6 +128,19 @@ describe.skipIf(!romPath || !savePath)(
         expect(value).toBeGreaterThanOrEqual(0);
         expect(value).toBeLessThanOrEqual(0xffff);
       }
+
+      expect(imported.boxes).toHaveLength(18);
+
+      const boxedCount = imported.boxes.reduce(
+        (total, box) =>
+          total +
+          box.slots.filter(
+            (pokemon) => pokemon !== null,
+          ).length,
+        0,
+      );
+
+      expect(boxedCount).toBe(5);
     });
   },
 );

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   convertPlatinumPartyPokemon,
   importPlatinumParty,
+  platinumRibbons,
   platinumStatus,
 } from './platinum-party.ts';
 
@@ -140,6 +141,46 @@ describe('Platinum party import', () => {
     },
   );
 
+  it('maps all three native ribbon bitfields', () => {
+    expect(
+      platinumRibbons({
+        // GBA ribbon IDs 0 and 31.
+        gba: 0x80000001,
+
+        // Bit 0: ribbon 32.
+        // Bit 1: ribbon 53.
+        // Bit 27: ribbon 79.
+        // Bit 28: unused and must be ignored.
+        ds1: 0x18000003,
+
+        // Bits 0 and 19: ribbons 33 and 52.
+        // Bit 20: unused and must be ignored.
+        ds2:
+          (1n << 0n) |
+          (1n << 19n) |
+          (1n << 20n),
+      }),
+    ).toEqual([
+      0,
+      31,
+      32,
+      33,
+      52,
+      53,
+      79,
+    ]);
+  });
+
+  it('returns no ribbons for empty bitfields', () => {
+    expect(
+      platinumRibbons({
+        gba: 0,
+        ds1: 0,
+        ds2: 0n,
+      }),
+    ).toEqual([]);
+  });
+
   it('converts native Pokémon fields to OpenSinnoh IDs', () => {
     const converted = convertPlatinumPartyPokemon(
       makePokemonData(),
@@ -171,6 +212,7 @@ describe('Platinum party import', () => {
       pokerus: 0x32,
       ball: 'platinum:ITEM_POKE_BALL',
       markings: 3,
+      ribbons: [],
       fatefulEncounter: true,
       met: {
         zone: null,
@@ -214,6 +256,7 @@ describe('Platinum party import', () => {
           level: pokemon.level,
           moves: pokemon.moves,
           ability: pokemon.ability,
+          ribbons: pokemon.ribbons,
           hp: `${pokemon.hp}/${pokemon.stats.hp}`,
         })),
       );
@@ -228,6 +271,11 @@ describe('Platinum party import', () => {
         expect(pokemon.hp).toBeLessThanOrEqual(
           pokemon.stats.hp,
         );
+
+        for (const ribbon of pokemon.ribbons) {
+          expect(ribbon).toBeGreaterThanOrEqual(0);
+          expect(ribbon).toBeLessThan(80);
+        }
       }
     },
   );

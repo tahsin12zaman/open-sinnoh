@@ -258,7 +258,12 @@ export interface PlatinumTrainerData {
   secretId: number;
   money: number;
   gender: number;
+  language: number;
   badges: number;
+  appearance: number;
+  gameCode: number;
+  mainStoryCleared: boolean;
+  hasNationalDex: boolean;
   coins: number;
   playTime: {
     hours: number;
@@ -286,6 +291,9 @@ export function readPlatinumTrainerData(
   );
 
   const combinedId = view.getUint32(base + 0x78, true);
+  const completionFlags = view.getUint8(
+    base + 0x85,
+  );
 
   return {
     nameCodes,
@@ -293,7 +301,14 @@ export function readPlatinumTrainerData(
     secretId: combinedId >>> 16,
     money: view.getUint32(base + 0x7c, true),
     gender: view.getUint8(base + 0x80),
+    language: view.getUint8(base + 0x81),
     badges: view.getUint8(base + 0x82),
+    appearance: view.getUint8(base + 0x83),
+    gameCode: view.getUint8(base + 0x84),
+    mainStoryCleared:
+      (completionFlags & 0x1) !== 0,
+    hasNationalDex:
+      (completionFlags & 0x2) !== 0,
     coins: view.getUint16(base + 0x88, true),
     playTime: {
       hours: view.getUint16(base + 0x8a, true),
@@ -350,4 +365,39 @@ export function readPlatinumPlayerLocation(
   }
 
   return location;
+}
+
+/**
+ * SAVE_TABLE_ENTRY_MISC starts at 0x1fc4 in Platinum's selected
+ * general block. MiscSaveBlock.rivalName follows 128 padded
+ * BerryPatch records and PersistedMapFeatures, placing it at 0x27e8.
+ */
+export const PLATINUM_MISC_BLOCK_OFFSET = 0x1fc4;
+export const PLATINUM_RIVAL_NAME_OFFSET = 0x27e8;
+export const PLATINUM_TRAINER_NAME_CODE_COUNT = 8;
+
+export interface PlatinumRivalData {
+  nameCodes: number[];
+}
+
+export function readPlatinumRivalData(
+  bytes: Uint8Array,
+): PlatinumRivalData {
+  const { general } = selectPlatinumSaveBlocks(bytes);
+  const offset =
+    general.offset + PLATINUM_RIVAL_NAME_OFFSET;
+
+  const view = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  );
+
+  const nameCodes = Array.from(
+    { length: PLATINUM_TRAINER_NAME_CODE_COUNT },
+    (_, index) =>
+      view.getUint16(offset + index * 2, true),
+  );
+
+  return { nameCodes };
 }

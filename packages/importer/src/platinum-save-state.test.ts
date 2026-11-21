@@ -1,7 +1,45 @@
 import { readFileSync } from 'node:fs';
-import type { GameState } from '@opensinnoh/contracts';
-import { describe, expect, it } from 'vitest';
+import type {
+  GameState,
+  Registries,
+} from '@opensinnoh/contracts';
+import type {
+  Id,
+  PackData,
+} from '@opensinnoh/core';
+import {
+  beforeAll,
+  describe,
+  expect,
+  it,
+} from 'vitest';
+import { importPlatinum } from './platinum.ts';
 import { importPlatinumSaveState } from './platinum-save-state.ts';
+
+const romPath = process.env.OPENSINNOH_NDS_ROM;
+const savePath = process.env.OPENSINNOH_NDS_SAV;
+
+function registriesOf(
+  pack: PackData,
+): Registries {
+  return Object.fromEntries(
+    Object.entries(pack.registries).map(
+      ([name, records]) => [
+        name,
+        new Map(
+          (
+            records as unknown as {
+              id: Id;
+            }[]
+          ).map((record) => [
+            record.id,
+            record,
+          ]),
+        ),
+      ],
+    ),
+  ) as unknown as Registries;
+}
 
 function makeBaseState(): GameState {
   return {
@@ -26,61 +64,102 @@ function makeBaseState(): GameState {
       facing: 'up',
     },
     party: [],
-  } as GameState;
+    boxes: [],
+    currentBox: 0,
+    flags: {},
+    vars: {},
+  } as unknown as GameState;
 }
 
-describe('Platinum combined save import', () => {
-  it.skipIf(!process.env.OPENSINNOH_NDS_SAV)(
-    'applies a real save to an OpenSinnoh state',
-    () => {
+describe.skipIf(!romPath || !savePath)(
+  'Platinum combined save import',
+  () => {
+    let registries: Registries;
+
+    beforeAll(async () => {
+      const rom = new Uint8Array(
+        readFileSync(romPath!),
+      );
+
+      const { pack } = await importPlatinum(rom);
+      registries = registriesOf(pack);
+    });
+
+    it('applies a real save to an OpenSinnoh state', () => {
       const bytes = new Uint8Array(
-        readFileSync(process.env.OPENSINNOH_NDS_SAV!),
+        readFileSync(savePath!),
       );
 
       const base = makeBaseState();
+
       const imported = importPlatinumSaveState(
-  base,
-  bytes,
-  {
-    flags: new Map(),
-    vars: new Map(),
-  },
-);
+        base,
+        bytes,
+        registries,
+      );
+
+      const boxedCount = imported.boxes.reduce(
+        (total, box) =>
+          total +
+          box.slots.filter(
+            (pokemon) => pokemon !== null,
+          ).length,
+        0,
+      );
 
       console.log('combined import:', {
         player: imported.names.player,
+        rival: imported.names.rival,
         gender: imported.gender,
         trainerId: imported.trainerId,
         money: imported.money,
         coins: imported.coins,
         playTime: imported.playTime,
         location: imported.player,
+        badges: imported.badges,
         party: imported.party.map((pokemon) => ({
           species: pokemon.species,
           level: pokemon.level,
           hp: `${pokemon.hp}/${pokemon.stats.hp}`,
         })),
+        boxes: {
+          count: imported.boxes.length,
+          current: imported.currentBox,
+          occupied: boxedCount,
+        },
+        pokedex: {
+          obtained: imported.pokedex.obtained,
+          national: imported.pokedex.national,
+          seen: imported.pokedex.seen.length,
+          caught: imported.pokedex.caught.length,
+        },
+        poketch: {
+          enabled: imported.poketch.enabled,
+          apps: imported.poketch.apps,
+          current: imported.poketch.current,
+          steps: imported.poketch.steps,
+        },
       });
 
-      expect(imported.names.player).not.toBe(
-        base.names.player,
-      );
-
-      expect(imported.trainerId).not.toBe(
-        base.trainerId,
-      );
-
+      expect(imported.names.player).toBe('Tahsin');
+      expect(imported.names.rival).toBe('Barry');
       expect(imported.player.zone).toMatch(
         /^platinum:MAP_HEADER_/,
       );
 
-      expect(imported.player.x).toBeGreaterThanOrEqual(0);
-      expect(imported.player.z).toBeGreaterThanOrEqual(0);
       expect(imported.party.length).toBeGreaterThan(0);
       expect(imported.party.length).toBeLessThanOrEqual(6);
 
+      expect(imported.boxes).toHaveLength(18);
+      expect(boxedCount).toBe(5);
+      expect(imported.currentBox).toBe(0);
+
+      expect(imported.pokedex.obtained).toBe(true);
+      expect(imported.poketch.enabled).toBe(true);
+
       expect(base.names.player).toBe('Player');
       expect(base.party).toEqual([]);
-    },
-  );
-});
+      expect(base.boxes).toEqual([]);
+    });
+  },
+);

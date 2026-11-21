@@ -80,6 +80,7 @@ segment's check), the question (`TVInterview_LoadMessage`), the word, `SaveTVInt
   `TvRecord`, the pending data), `TvSegmentData` (one kind per segment), `TvTables` (`NewGame.tv`), and the recorders as
   shared state edits (`saveTvSegment`, `tvCatch`, `tvSafariCatch`, `tvRibbon`, `tvBattlePoints`, `tvDaily`, `tvTimeSlot`).
 - **Importer** `tv.ts`: tv.narc into `NewGame.tv`, checked (programmes 1–9, types 1–5, segment ids within the type's).
+- **Platinum save importer**: `nds/platinum-tv.ts` decodes the Rev 1 `TVBroadcast` block; `importer/platinum-tv.ts` converts its local saved segments, watch progress and pending interview data into `GameState.tv`.
 - **Services** `tv.ts`: the status, schedule, framing messages, commercials, the four passes, eligibility, every
   segment's message and template (`TvMessage`: a bank by name, a message index, template slots), the interviews.
 - **VM** `tv-ops.ts` (`REAL_TV`): `call_tv_broadcast` (its operands decoded per call), `call_tv_interview`,

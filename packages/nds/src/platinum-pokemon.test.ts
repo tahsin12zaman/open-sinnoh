@@ -148,7 +148,8 @@ describe('Platinum Pokémon codec', () => {
   it('rejects a Pokémon with a bad checksum', () => {
     const { record } = makeEncryptedPokemon(5 << 13);
 
-    record[PLATINUM_BOX_DATA_OFFSET] ^= 1;
+    record[PLATINUM_BOX_DATA_OFFSET] =
+      record[PLATINUM_BOX_DATA_OFFSET]! ^ 1;
 
     expect(() =>
       decodePlatinumPartyPokemon(record),

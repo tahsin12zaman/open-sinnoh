@@ -1,6 +1,7 @@
 import type { GameState } from '@opensinnoh/contracts';
 import {
   readPlatinumPlayerLocation,
+  readPlatinumRivalData,
   readPlatinumTrainerData,
   type PlatinumLocation,
   type PlatinumTrainerData,
@@ -64,6 +65,14 @@ export function importPlatinumTrainer(
   );
 }
 
+export function importPlatinumRivalName(
+  save: Uint8Array,
+): string {
+  return decodePlatinumName(
+    readPlatinumRivalData(save).nameCodes,
+  );
+}
+
 function platinumGender(
   gender: number,
 ): GameState['gender'] {
@@ -109,10 +118,24 @@ export function applyPlatinumTrainer(
     },
     gender: platinumGender(trainer.gender),
     trainerId: combinedTrainerId,
+    appearance: trainer.appearance,
     money: trainer.money,
     coins: trainer.coins,
     playTime: {
       ...trainer.playTime,
+    },
+  };
+}
+
+export function applyPlatinumRivalName(
+  state: GameState,
+  rivalName: string,
+): GameState {
+  return {
+    ...state,
+    names: {
+      ...state.names,
+      rival: rivalName,
     },
   };
 }
@@ -151,8 +174,13 @@ export function applyPlatinumSave(
     importPlatinumTrainer(save),
   );
 
-  return applyPlatinumLocation(
+  const withRival = applyPlatinumRivalName(
     withTrainer,
+    importPlatinumRivalName(save),
+  );
+
+  return applyPlatinumLocation(
+    withRival,
     readPlatinumPlayerLocation(save),
   );
 }

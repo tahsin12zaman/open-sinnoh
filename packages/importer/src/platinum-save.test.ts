@@ -25,7 +25,12 @@ const TEST_TRAINER: ImportedPlatinumTrainer = {
   secretId: 54321,
   money: 123456,
   gender: 1,
+  language: 2,
   badges: 3,
+  appearance: 7,
+  gameCode: 0,
+  mainStoryCleared: false,
+  hasNationalDex: false,
   coins: 250,
   playTime: {
     hours: 10,
@@ -56,7 +61,7 @@ function makeBaseState(): GameState {
       y: 7,
       facing: 'up',
     },
-  } as GameState;
+  } as unknown as GameState;
 }
 
 describe('Platinum save import', () => {
@@ -72,7 +77,12 @@ describe('Platinum save import', () => {
         secretId: 54321,
         money: 123456,
         gender: 1,
+        language: 2,
         badges: 3,
+        appearance: 7,
+        gameCode: 0,
+        mainStoryCleared: false,
+        hasNationalDex: false,
         coins: 250,
         playTime: {
           hours: 10,
@@ -97,6 +107,7 @@ describe('Platinum save import', () => {
       },
       gender: 'female',
       trainerId: ((54321 << 16) | 12345) >>> 0,
+      appearance: 7,
       money: 123456,
       coins: 250,
       playTime: {

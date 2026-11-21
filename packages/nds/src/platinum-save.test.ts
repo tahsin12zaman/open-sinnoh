@@ -107,7 +107,7 @@ describe('Platinum save blocks', () => {
 
   it('rejects a changed byte', () => {
     const bytes = makeBlock(0x80, 0);
-    bytes[5] ^= 1;
+    bytes[5] = bytes[5]! ^ 1;
 
     expect(() =>
       validatePlatinumSaveBlock(bytes, 0, bytes.length, 0),
@@ -149,7 +149,8 @@ it('uses the other copy when one block is corrupt', () => {
   writeBlock(save, primary, PLATINUM_STORAGE_BLOCK, 5, 2);
   writeBlock(save, backup, PLATINUM_STORAGE_BLOCK, 5, 1);
 
-  save[primary + 20] ^= 1;
+  save[primary + 20] =
+    save[primary + 20]! ^ 1;
 
   const selected = selectPlatinumSaveBlocks(save);
 
@@ -228,7 +229,11 @@ it('reads trainer data from the selected general block', () => {
   view.setUint32(base + 0x78, (54321 << 16) | 12345, true);
   view.setUint32(base + 0x7c, 987654, true);
   view.setUint8(base + 0x80, 1);
+  view.setUint8(base + 0x81, 2);
   view.setUint8(base + 0x82, 0b10101101);
+  view.setUint8(base + 0x83, 7);
+  view.setUint8(base + 0x84, 0);
+  view.setUint8(base + 0x85, 0b00000011);
   view.setUint16(base + 0x88, 4321, true);
   view.setUint16(base + 0x8a, 127, true);
   view.setUint8(base + 0x8c, 34);
@@ -246,7 +251,12 @@ refreshBlockChecksum(
     secretId: 54321,
     money: 987654,
     gender: 1,
+    language: 2,
     badges: 0b10101101,
+    appearance: 7,
+    gameCode: 0,
+    mainStoryCleared: true,
+    hasNationalDex: true,
     coins: 4321,
     playTime: {
       hours: 127,
