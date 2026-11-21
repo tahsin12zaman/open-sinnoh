@@ -1,4 +1,7 @@
-import type { Button } from '@opensinnoh/core';
+import type {
+  Button,
+  Id,
+} from '@opensinnoh/core';
 
 /**
  * Raw input state between game ticks. `previous` is required so a
@@ -29,4 +32,25 @@ export interface RuntimeElevatorRideSnapshot {
   direction: 'up' | 'down';
   loops: number;
   elapsed: number;
+}
+
+export interface RuntimeFishingTaskSnapshot {
+  kind: 'fishing';
+  rod: 0 | 1 | 2;
+  roll: {
+    species: Id;
+    level: number;
+  } | null;
+  phase:
+    | 'prepare'
+    | 'cast'
+    | 'wait'
+    | 'bite'
+    | 'missed'
+    | 'reel'
+    | 'message'
+    | 'put-away'
+    | 'done';
+  ticks: number;
+  caught: boolean;
 }

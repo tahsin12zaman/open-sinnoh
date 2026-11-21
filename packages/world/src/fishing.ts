@@ -1,7 +1,11 @@
 /** Fishing task semantics: pret/pokeplatinum 1dc13dc overlay005/fishing.c (SysTask GoFish),
  * overlay006/wild_encounters.c GetRodEncounterSlot / TryFishingEncounter. One update = one 30 Hz tick.
  * Ability encounter-rate doubling is a native no-op bug (ModifyEncounterRateWithFieldParams). */
-import type { EncounterTable, InputFrame } from '@opensinnoh/contracts';
+import type {
+  EncounterTable,
+  InputFrame,
+  RuntimeFishingTaskSnapshot,
+} from '@opensinnoh/contracts';
 import { FEEBAS_LEVELS, Prng, type Id, type PrngState } from '@opensinnoh/core';
 import type { WildRoll } from './encounters.ts';
 
@@ -43,6 +47,42 @@ export class FishingTask {
     /** FishingTask_FishGotAway: its game record and TV segment. */
     private gotAway: () => void,
   ) {}
+  capture(): RuntimeFishingTaskSnapshot {
+    return {
+      kind: 'fishing',
+      rod: this.rod,
+      roll: this.roll
+        ? { ...this.roll }
+        : null,
+      phase: this.phase,
+      ticks: this.ticks,
+      caught: this.caught,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimeFishingTaskSnapshot,
+    next: () => number,
+    notice: (name: string) => void,
+    gotAway: () => void,
+  ): FishingTask {
+    const task = new FishingTask(
+      snapshot.rod,
+      snapshot.roll
+        ? { ...snapshot.roll }
+        : null,
+      next,
+      notice,
+      gotAway,
+    );
+
+    task.phase = snapshot.phase;
+    task.ticks = snapshot.ticks;
+    task.caught = snapshot.caught;
+
+    return task;
+  }
+
   /** TRUE while task owns input. Messages are driven by the shared script notice, with fresh presses. */
   step(input: InputFrame, messageRunning: boolean): boolean {
     const a = input.pressed.includes('a');
