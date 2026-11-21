@@ -1,5 +1,8 @@
 import { BUTTONS, type Button } from '@opensinnoh/core';
-import type { InputFrame } from '@opensinnoh/contracts';
+import type {
+  InputFrame,
+  RuntimeInputSnapshot,
+} from '@opensinnoh/contracts';
 
 /** Buttons held now but not last tick, in BUTTONS order. */
 export function computePressed(held: ReadonlySet<Button>, previous: ReadonlySet<Button>): Button[] {
@@ -67,6 +70,30 @@ export class InputState {
     this.previous = new Set(this.held);
     this.tapId = null;
     return frame;
+  }
+
+  capture(): RuntimeInputSnapshot {
+    return {
+      held: BUTTONS.filter((button) =>
+        this.held.has(button),
+      ),
+      previous: BUTTONS.filter((button) =>
+        this.previous.has(button),
+      ),
+      touch: this.touchPoint
+        ? { ...this.touchPoint }
+        : null,
+      tap: this.tapId,
+    };
+  }
+
+  restore(snapshot: RuntimeInputSnapshot): void {
+    this.held = new Set(snapshot.held);
+    this.previous = new Set(snapshot.previous);
+    this.touchPoint = snapshot.touch
+      ? { ...snapshot.touch }
+      : null;
+    this.tapId = snapshot.tap;
   }
 
   clear(): void {
