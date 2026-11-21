@@ -13,3 +13,20 @@ export interface RuntimeInputSnapshot {
   } | null;
   tap: string | null;
 }
+
+export interface RuntimeShakeTaskSnapshot {
+  kind: 'shake';
+  actor: number;
+  degrees: number;
+  times: number;
+  speed: number;
+  x: number;
+  z: number;
+}
+
+export interface RuntimeElevatorRideSnapshot {
+  kind: 'elevator';
+  direction: 'up' | 'down';
+  loops: number;
+  elapsed: number;
+}

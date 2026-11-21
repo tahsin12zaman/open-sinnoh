@@ -1,3 +1,7 @@
+import type {
+  RuntimeElevatorRideSnapshot,
+  RuntimeShakeTaskSnapshot,
+} from '@opensinnoh/contracts';
 import type { FieldSound } from './sound.ts';
 import type { Actor } from './npc.ts';
 
@@ -19,7 +23,42 @@ export class ShakeTask {
     private readonly speed: number,
     private readonly x: number,
     private readonly z: number,
-  ) {}
+    degrees = 0,
+  ) {
+    this.degrees = degrees;
+  }
+
+  capture(): RuntimeShakeTaskSnapshot {
+    return {
+      kind: 'shake',
+      actor: this.actor.localId,
+      degrees: this.degrees,
+      times: this.times,
+      speed: this.speed,
+      x: this.x,
+      z: this.z,
+    };
+  }
+
+  static restore(
+    actor: Actor,
+    snapshot: RuntimeShakeTaskSnapshot,
+  ): ShakeTask {
+    if (actor.localId !== snapshot.actor) {
+      throw new Error(
+        `shake restore: actor ${actor.localId} does not match ${snapshot.actor}`,
+      );
+    }
+
+    return new ShakeTask(
+      actor,
+      snapshot.times,
+      snapshot.speed,
+      snapshot.x,
+      snapshot.z,
+      snapshot.degrees,
+    );
+  }
 
   /** One frame; true when the task has ended. */
   step(): boolean {
@@ -59,14 +98,46 @@ export function elevatorTicks(loops: number): number {
  * lights back at rest.
  */
 export class ElevatorRide {
-  private elapsed = 0;
   private readonly ticks: number;
+
   constructor(
     private readonly direction: 'up' | 'down',
-    loops: number,
+    private readonly loops: number,
     private readonly sound: FieldSound,
+    private elapsed = 0,
   ) {
     this.ticks = elevatorTicks(loops);
+
+    if (
+      !Number.isInteger(elapsed) ||
+      elapsed < 0 ||
+      elapsed > this.ticks
+    ) {
+      throw new Error(
+        `world: invalid elevator elapsed ${elapsed}`,
+      );
+    }
+  }
+
+  capture(): RuntimeElevatorRideSnapshot {
+    return {
+      kind: 'elevator',
+      direction: this.direction,
+      loops: this.loops,
+      elapsed: this.elapsed,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimeElevatorRideSnapshot,
+    sound: FieldSound,
+  ): ElevatorRide {
+    return new ElevatorRide(
+      snapshot.direction,
+      snapshot.loops,
+      sound,
+      snapshot.elapsed,
+    );
   }
 
   /** One frame; true when the task has ended. The motor and chime are cues only: the ride's length never waits on audio. */
