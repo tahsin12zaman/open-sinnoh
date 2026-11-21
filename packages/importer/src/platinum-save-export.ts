@@ -178,7 +178,7 @@ export function convertOpenSinnohTrainer(
     badges: badgeBits(state.badges),
     appearance:
       state.appearance ?? base.appearance,
-    coins: state.coins,
+    coins: Math.min(state.coins, 9999),
     playTime: {
       ...state.playTime,
     },
