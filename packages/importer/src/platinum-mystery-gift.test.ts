@@ -15,8 +15,9 @@ function raw(): PlatinumMysteryGift {
     new Uint8Array(0x100);
 
   // Wonder Card ID 123 was received.
-  receivedFlags[123 >>> 3] |=
-    1 << (123 & 7);
+  receivedFlags[123 >>> 3] =
+    receivedFlags[123 >>> 3]! |
+    (1 << (123 & 7));
 
   return {
     unlocked: true,

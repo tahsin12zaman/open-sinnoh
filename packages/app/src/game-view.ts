@@ -4,7 +4,8 @@
  */
 import { BUTTONS, DEFAULT_CLOCK, type Button, type ClockTime } from '@opensinnoh/core';
 import { DEFAULT_DEVICE_OPTIONS, PANEL_HEIGHT, PANEL_WIDTH, type GameState, type InputFrame, type SaveEnvelope } from '@opensinnoh/contracts';
-import { IndexedDbSaveStore, PackMismatchError, saveFromJson, TEXT_FRAME_DELAY, validateSave, type Game, type NewGameOptions, type TextSpeedOption } from '@opensinnoh/game';
+import { IndexedDbSaveStore, PackMismatchError, saveFromJson, saveToJson, TEXT_FRAME_DELAY, validateSave, type Game, type NewGameOptions, type TextSpeedOption } from '@opensinnoh/game';
+import { importPlatinumSaveState } from '@opensinnoh/importer';
 import { checkNewGame, readNewGame, storeNewGame } from './new-game.ts';
 import { createSession, warmBattleEngine, type Session } from './boot.ts';
 import { parseEnhanced, setEnhancedVisuals, visualStyleConfig, type EnhancedConfig } from '@opensinnoh/render';
@@ -928,26 +929,83 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
       return S.game.exported;
     },
     async importSave(ask) {
-      const file = await pickFile('.json,application/json');
+      const file = await pickFile(
+        '.json,.sav,application/json,application/octet-stream',
+      );
       if (!file) return '';
-      if (file.size > MAX_SAVE_FILE) throw new Error(S.game.saveTooLarge);
-      if (!(await ask(titleActive ? S.game.replaceSaved : S.game.replaceGame))) return '';
-      const text = await file.text();
-      // Loading validates it (strictly: shape, packs, ids) before anything is kept.
+
+      const platinum =
+        file.name.toLowerCase().endsWith('.sav');
+
+      if (platinum) {
+        if (file.size !== 0x80000) {
+          throw new Error(
+            'A Pokémon Platinum save must be exactly 512 KiB.',
+          );
+        }
+      } else if (file.size > MAX_SAVE_FILE) {
+        throw new Error(S.game.saveTooLarge);
+      }
+
+      if (
+        !(await ask(
+          titleActive
+            ? S.game.replaceSaved
+            : S.game.replaceGame,
+        ))
+      ) {
+        return '';
+      }
+
+      let text: string;
+
       try {
+        if (platinum) {
+          const state = importPlatinumSaveState(
+            session.game.state,
+            new Uint8Array(
+              await file.arrayBuffer(),
+            ),
+            session.game.registries,
+          );
+
+          text = saveToJson({
+            format: 'lantern-nds-save',
+            version: 1,
+            savedAt: new Date().toISOString(),
+            state,
+          });
+        } else {
+          text = await file.text();
+        }
+
+        // Loading validates the converted Platinum state or
+        // the supplied OpenSinnoh JSON before anything is kept.
         await session.load(text);
       } catch (e) {
-        throw new Error(saveImportMessage(e), { cause: e });
+        throw new Error(
+          saveImportMessage(e),
+          { cause: e },
+        );
       }
+
       await suspend.loaded();
+
       if (!titleActive) {
-        // The load closes the OPTIONS app that asked, so the line goes where it is still read.
-        const text = S.game.loadedSave;
-        ui!.notice(text);
-        return text;
+        // The load closes the OPTIONS app that asked, so the
+        // line goes where it is still read.
+        const loaded = S.game.loadedSave;
+        ui!.notice(loaded);
+        return loaded;
       }
-      await saves.put(SAVE_SLOT, saveFromJson(text) as SaveEnvelope);
-      // The title read its save when it opened: start again so CONTINUE shows this one.
+
+      await saves.put(
+        SAVE_SLOT,
+        saveFromJson(text) as SaveEnvelope,
+      );
+
+      // The title read its save when it opened: start again
+      // so CONTINUE shows this one.
       location.reload();
       return S.game.savedRestarting;
     },

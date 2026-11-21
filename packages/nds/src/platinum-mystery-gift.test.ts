@@ -76,7 +76,8 @@ describe('Platinum Mystery Gift', () => {
     ).toThrow(/Truncated/);
 
     const bytes = fixture();
-    bytes[0x100] ^= 1;
+    bytes[0x100] =
+      bytes[0x100]! ^ 1;
 
     expect(() =>
       decodePlatinumMysteryGift(bytes),
