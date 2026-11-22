@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { RECORD_STEPS, type Button } from '@opensinnoh/core';
 import type { Facing, GameState } from '@opensinnoh/contracts';
 import { f, mon, newState, pos, setup, type Harness } from './testing.ts';
-import { HM_CUT_IN_TICKS } from './avatar.ts';
+import { HM_CUT_IN_TICKS, validateAvatarRuntimeSnapshot } from './avatar.ts';
 
 const SURFER = mon('SPECIES_DRIPLING', 20, ['MOVE_SURF', 'MOVE_WATERFALL', 'MOVE_ROCK_CLIMB']);
 
@@ -28,6 +28,40 @@ function until(g: Harness, done: () => boolean, max = 400, held: Button[] = []):
 }
 
 const effects = (g: Harness) => g.world.view().effects.map((e) => ({ effect: e.effect, anim: e.anim }));
+
+
+describe('avatar runtime continuation validation', () => {
+  const base = {
+    speed: 0, brake: false, movingDir: 'down', moving: false, forced: false,
+    retainSpeed: false, slopeBack: false, ignoreTile: false, escapedMud: false,
+    doNotSink: false, onCyclingRoad: false, elevated: false,
+    task: null, mount: null, ripple: null, override: null, lastStep: null,
+  };
+
+  it('accepts idle state and valid tagged continuations', () => {
+    expect(validateAvatarRuntimeSnapshot(base)).toBe(true);
+    expect(validateAvatarRuntimeSnapshot({ ...base, task: { kind: 'surf', dir: 'left', phase: 'jump' } })).toBe(true);
+    expect(validateAvatarRuntimeSnapshot({
+      ...base, task: { kind: 'strength', dir: 'up', phase: 'push', boulderId: 'actor:128' },
+    })).toBe(true);
+    expect(validateAvatarRuntimeSnapshot({
+      ...base, task: { kind: 'waterfall', dir: 'up', phase: 'move', t: 12,
+        from: [1, 2, 3], to: [4, 5, 6], tx: 4, tz: 6 },
+    })).toBe(true);
+  });
+
+  it('rejects unknown tags, malformed fields, and unserializable generator continuations', () => {
+    expect(validateAvatarRuntimeSnapshot({ ...base, task: { kind: 'mystery' } })).toBe(false);
+    expect(validateAvatarRuntimeSnapshot({ ...base, task: { kind: 'surf', dir: 'north', phase: 'jump' } })).toBe(false);
+    expect(validateAvatarRuntimeSnapshot({
+      ...base, task: { kind: 'strength', dir: 'up', phase: 'push', boulderId: '' },
+    })).toBe(false);
+    expect(validateAvatarRuntimeSnapshot({
+      ...base, task: { kind: 'strength', dir: 'up', phase: 'push', boulderId: 'actor:128', fall: {} },
+    })).toBe(false);
+    expect(validateAvatarRuntimeSnapshot({ ...base, speed: 4 })).toBe(false);
+  });
+});
 
 describe('surfing (FieldTask_StartUseSurf, PlayerAvatar_SetMovement_Normal)', () => {
   it('A facing water starts the Surf script only with the Fen Badge and a party Pokémon that knows Surf', () => {
