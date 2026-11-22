@@ -913,9 +913,9 @@ describe('in-place world runtime actor snapshots', () => {
     expect(g.state.player).toMatchObject({ x: 39, z: 15 });
     runtime.restoreActorRuntime(snapshot);
     expect(g.state.player).toMatchObject({ x: 38, z: 15 });
-    expect(g.world.view().actors.find((actor) => actor.localId === LOCALID_PLAYER)).toMatchObject({
-      x: 38, z: 15,
-    });
+    expect(g.world.view().actors.find((actor) => actor.localId === LOCALID_PLAYER)?.cur).toEqual([
+      38 * 16 + 8, expect.any(Number), 15 * 16 + 8,
+    ]);
     expect(g.state.records.counts[RECORD_STEPS] ?? 0).toBe(tickBefore);
 
     // Reapplying the same image is idempotent and does not tick the simulation.
