@@ -2880,6 +2880,12 @@ export class FieldWorld implements OpenSinnohWorld {
         if (kind === 'dig') onEscape(this.reg, this.state);
         else onFlyOrTeleport(this.reg, this.state);
       },
+    }, {
+      slot,
+      destination: {
+        ...dest,
+      },
+      kind,
     });
   }
 
@@ -2944,7 +2950,7 @@ export class FieldWorld implements OpenSinnohWorld {
       zoneEncounters: () => !!this.zone.encounters,
       tileRate: () => this.tileHasEncounterRate(),
       playSe: () => this.sound.audio.playSe(tables.sweetScent.sound),
-    });
+    }, slot);
   }
 
   /** WildEncounters_TileHasEncounterRate under the player. */
@@ -3108,11 +3114,19 @@ export class FieldWorld implements OpenSinnohWorld {
         ball: () => this.sound.playNamed('SEQ_SE_DP_BOWA'),
         fanfare: () => this.sound.fanfareNamed('SEQ_ASA'),
         fanfareWaiting: () => audio.waitFanfare(),
-      });
+      }, 'pokecenter');
       return;
     }
     if (record && !record.hallOfFame) this.log.stub('heal-machine:hall-of-fame', 'no NewGame.healMachine.hallOfFame: the Hall of Fame machine is timed only');
-    this.healMachine = new HealMachine(balls, record ? clip(record.ball, 'healing ball') : undefined, true);
+    this.healMachine = new HealMachine(
+      balls,
+      record
+        ? clip(record.ball, 'healing ball')
+        : undefined,
+      true,
+      undefined,
+      'hall-of-fame',
+    );
   }
 
   healAnimationDone(): boolean {

@@ -63,6 +63,8 @@ export interface RuntimeHmCutInSnapshot {
 
 export interface RuntimeSweetScentTaskSnapshot {
   kind: 'sweet-scent';
+  slot: number | null;
+  cutIn: RuntimeHmCutInSnapshot | null;
   phase:
     | 'cut-in'
     | 'check'
@@ -98,6 +100,15 @@ export interface RuntimeSpinSnapshot {
 
 export interface RuntimeTeleportTaskSnapshot {
   kind: 'teleport';
+  slot: number;
+  destination: {
+    zone: Id;
+    x: number;
+    z: number;
+    facing?: Facing;
+  };
+  teleportKind: 'teleport' | 'dig';
+  cutIn: RuntimeHmCutInSnapshot;
   phase:
     | 'cut-in'
     | 'out-start'
@@ -121,6 +132,7 @@ export interface RuntimeHealMachineSnapshot {
   balls: number;
   final: number;
   pattern: boolean;
+  machine: 'pokecenter' | 'hall-of-fame';
   state:
     | 'start'
     | 'add'

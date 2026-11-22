@@ -86,11 +86,29 @@ export class TeleportTask {
   private zoomActive = false;
   done = false;
 
-  constructor(private readonly h: TeleportHost) {}
+  constructor(
+    private readonly h: TeleportHost,
+    readonly runtime: {
+      slot: number;
+      destination: {
+        zone: import('@opensinnoh/core').Id;
+        x: number;
+        z: number;
+        facing?: Facing;
+      };
+      kind: 'teleport' | 'dig';
+    },
+  ) {}
 
   capture(): RuntimeTeleportTaskSnapshot {
     return {
       kind: 'teleport',
+      slot: this.runtime.slot,
+      destination: {
+        ...this.runtime.destination,
+      },
+      teleportKind: this.runtime.kind,
+      cutIn: this.h.cutIn.capture(),
       phase: this.phase,
       spin: this.spin?.capture() ?? null,
       delay: this.delay,
@@ -105,7 +123,16 @@ export class TeleportTask {
     snapshot: RuntimeTeleportTaskSnapshot,
     host: TeleportHost,
   ): TeleportTask {
-    const task = new TeleportTask(host);
+    const task = new TeleportTask(
+      host,
+      {
+        slot: snapshot.slot,
+        destination: {
+          ...snapshot.destination,
+        },
+        kind: snapshot.teleportKind,
+      },
+    );
 
     task.phase = snapshot.phase;
     task.spin = snapshot.spin

@@ -47,6 +47,9 @@ export class HealMachine {
     private readonly final = FINAL_TICKS,
     private readonly pattern = false,
     private readonly sound?: HealMachineSound,
+    readonly machine:
+      | 'pokecenter'
+      | 'hall-of-fame' = 'pokecenter',
   ) {
     if (!Number.isInteger(balls) || balls < 1 || balls > MAX_BALLS) throw new Error(`world: healing machine with ${balls} balls (1–${MAX_BALLS})`);
   }
@@ -57,6 +60,7 @@ export class HealMachine {
       balls: this.balls,
       final: this.final,
       pattern: this.pattern,
+      machine: this.machine,
       state: this.state,
       placed: this.placed,
       ballTicks: this.ballTicks,
@@ -73,6 +77,7 @@ export class HealMachine {
       snapshot.final,
       snapshot.pattern,
       sound,
+      snapshot.machine,
     );
 
     task.state = snapshot.state;

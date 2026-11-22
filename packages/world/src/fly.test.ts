@@ -65,6 +65,14 @@ describe('Teleport (field_warp.c sDigTeleportStates, sFieldWarpFadeInStates)', (
       fadeDone: () => fading === 0,
       face: (f) => facings.push(f),
       changeMap: () => log.push(`${tick} map`),
+    }, {
+      slot: 0,
+      destination: {
+        zone: 'x:DESTINATION' as never,
+        x: 0,
+        z: 0,
+      },
+      kind: 'teleport',
     });
     for (; tick < 600 && !task.done; tick++) {
       task.tick();

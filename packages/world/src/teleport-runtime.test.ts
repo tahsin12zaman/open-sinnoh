@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type {
   AudioHost,
   Facing,
+  RuntimeHmCutInSnapshot,
 } from '@opensinnoh/contracts';
 import type {
   Id,
@@ -13,23 +14,30 @@ import {
   type TeleportHost,
 } from './teleport.ts';
 
-function cutIn(): HmCutIn {
-  return new HmCutIn(
-    {
-      species: 'test:SPECIES' as Id,
-      form: 0,
-    } as Pokemon,
-    {
-      playCry: vi.fn(),
-    } as unknown as AudioHost,
-  );
+function cutIn(
+  snapshot?: RuntimeHmCutInSnapshot,
+): HmCutIn {
+  const mon = {
+    species: 'test:SPECIES' as Id,
+    form: 0,
+  } as Pokemon;
+
+  const sound = {
+    playCry: vi.fn(),
+  } as unknown as AudioHost;
+
+  return snapshot
+    ? HmCutIn.restore(mon, sound, snapshot)
+    : new HmCutIn(mon, sound);
 }
 
-function host() {
+function host(
+  cutInValue = cutIn(),
+) {
   const facings: Facing[] = [];
 
   const value: TeleportHost = {
-    cutIn: cutIn(),
+    cutIn: cutInValue,
     se: vi.fn(),
     fade: vi.fn(),
     fadeDone: () => true,
@@ -50,6 +58,16 @@ describe('teleport runtime snapshots', () => {
     const originalHost = host();
     const original = new TeleportTask(
       originalHost.value,
+      {
+        slot: 2,
+        destination: {
+          zone: 'test:DESTINATION' as Id,
+          x: 8,
+          z: 12,
+          facing: 'left',
+        },
+        kind: 'teleport',
+      },
     );
 
     for (let tick = 0; tick < 85; tick++) {
@@ -57,7 +75,9 @@ describe('teleport runtime snapshots', () => {
     }
 
     const snapshot = original.capture();
-    const restoredHost = host();
+    const restoredHost = host(
+      cutIn(snapshot.cutIn),
+    );
 
     const restored = TeleportTask.restore(
       snapshot,

@@ -44,13 +44,18 @@ export class SweetScentTask {
   private blend = { from: 0, span: 0, steps: 1, at: 0, value: 0 };
   private wait = 0;
 
-  constructor(private readonly h: SweetScentHost) {
+  constructor(
+    private readonly h: SweetScentHost,
+    readonly slot: number | null = null,
+  ) {
     if (!h.cutIn) this.phase = 'check';
   }
 
   capture(): RuntimeSweetScentTaskSnapshot {
     return {
       kind: 'sweet-scent',
+      slot: this.slot,
+      cutIn: this.h.cutIn?.capture() ?? null,
       phase: this.phase,
       blend: { ...this.blend },
       wait: this.wait,
@@ -61,7 +66,10 @@ export class SweetScentTask {
     snapshot: RuntimeSweetScentTaskSnapshot,
     host: SweetScentHost,
   ): SweetScentTask {
-    const task = new SweetScentTask(host);
+    const task = new SweetScentTask(
+      host,
+      snapshot.slot,
+    );
 
     task.phase = snapshot.phase;
     task.blend = { ...snapshot.blend };
