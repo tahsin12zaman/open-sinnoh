@@ -53,4 +53,34 @@ describe('RuntimeSnapshotCoordinator', () => {
     const snapshot = coordinator.capture();
     expect(() => coordinator.restore(snapshot)).toThrow(/battle serializer unavailable/);
   });
+  it('rolls back a subsystem that mutates before throwing during restore', () => {
+    const state = new Map<string, number>(ids.map((id) => [id, 10]));
+    let fail = true;
+    const participants: RuntimeSnapshotParticipant[] = ids.map((id) => ({
+      id,
+      capture: () => ({ value: state.get(id)! }) as RuntimeJsonValue,
+      validate: (payload) => (typeof payload === 'object' && payload !== null && !Array.isArray(payload) &&
+        typeof payload.value === 'number' ? null : 'invalid'),
+      restore: (payload) => {
+        if (typeof payload === 'object' && payload !== null && !Array.isArray(payload)) state.set(id, payload.value as number);
+        if (id === 'battle' && fail && typeof payload === 'object' && payload !== null &&
+            !Array.isArray(payload) && payload.value === 99) {
+          fail = false;
+          throw new Error('simulated restore failure after mutation');
+        }
+      },
+    }));
+    const coordinator = new RuntimeSnapshotCoordinator({
+      compatibility: { build: 'test', contracts: '0.50.4' },
+      boundary: { atTickBoundary: (operation) => operation(42) },
+      participants,
+      references: () => ({ actors: [], threads: [] }),
+    });
+    const snapshot = coordinator.capture();
+    for (const id of ids) state.set(id, 99);
+    const target = { ...snapshot, subsystems: { ...snapshot.subsystems, battle: { value: 99 } } };
+    expect(() => coordinator.restore(target)).toThrow(/simulated restore failure after mutation/);
+    expect(ids.map((id) => state.get(id))).toEqual(ids.map(() => 99));
+  });
+
 });
