@@ -65,6 +65,59 @@ interface Live {
   held?: { who: Occupant; x: number; z: number; clip: number };
 }
 
+/** JSON-safe field-effect continuation. Held occupants are represented by stable caller-owned keys. */
+export interface EffectsRuntimeSnapshot {
+  nextKey: number;
+  live: {
+    key: number;
+    effect: Id;
+    renderer: number;
+    anim: string;
+    tick: number;
+    ticks: number | null;
+    cur: Vec3;
+    prev: Vec3;
+    facing?: Facing;
+    follow: boolean;
+    held?: { occupant: string; x: number; z: number; clip: number };
+  }[];
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function vec3(value: unknown): value is Vec3 {
+  return Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
+/** Validates the portable portion of an effects snapshot before any effect is replaced. */
+export function validateEffectsRuntimeSnapshot(value: unknown): value is EffectsRuntimeSnapshot {
+  if (!record(value) || !Number.isSafeInteger(value.nextKey) || (value.nextKey as number) < 1 ||
+      !Array.isArray(value.live)) return false;
+  const keys = new Set<number>();
+  let maxKey = 0;
+  for (const item of value.live) {
+    if (!record(item) || !Number.isSafeInteger(item.key) || (item.key as number) < 1 ||
+        keys.has(item.key as number) || typeof item.effect !== 'string' ||
+        !Number.isInteger(item.renderer) || typeof item.anim !== 'string' || !item.anim ||
+        !Number.isInteger(item.tick) || (item.tick as number) < 0 ||
+        !(item.ticks === null || (Number.isInteger(item.ticks) && (item.ticks as number) > 0 && item.tick < item.ticks)) ||
+        !vec3(item.cur) || !vec3(item.prev) || typeof item.follow !== 'boolean' ||
+        (item.facing !== undefined && !['up', 'down', 'left', 'right'].includes(String(item.facing)))) return false;
+    keys.add(item.key as number);
+    maxKey = Math.max(maxKey, item.key as number);
+    if (item.held !== undefined) {
+      const h = item.held;
+      if (!record(h) || typeof h.occupant !== 'string' || !h.occupant ||
+          !Number.isFinite(h.x) || !Number.isFinite(h.z) ||
+          !Number.isInteger(h.clip) || (h.clip as number) <= 0 ||
+          item.ticks !== null || item.tick >= h.clip) return false;
+    }
+  }
+  return (value.nextKey as number) > maxKey;
+}
+
 const AXIS: Record<Facing, string> = { up: 'VERTICAL', down: 'VERTICAL', left: 'HORIZONTAL', right: 'HORIZONTAL' };
 
 /**
@@ -139,6 +192,54 @@ export class Effects {
     const key = this.nextKey++;
     this.live.push({ key, effect: effect.id, renderer: -1, anim, tick: 0, ticks: clip.ticks, cur: [...at], prev: [...at], follow: false });
     return key;
+  }
+
+  /** Capture every live field effect, including held-object identity and animation progress. */
+  captureRuntimeSnapshot(keyOfOccupant: (who: Occupant) => string | null): EffectsRuntimeSnapshot {
+    const live = this.live.map((e): EffectsRuntimeSnapshot['live'][number] => {
+      let held: EffectsRuntimeSnapshot['live'][number]['held'];
+      if (e.held) {
+        const occupant = keyOfOccupant(e.held.who);
+        if (!occupant) throw new Error('runtime snapshot: field effect has an unkeyed held occupant');
+        held = { occupant, x: e.held.x, z: e.held.z, clip: e.held.clip };
+      }
+      return {
+        key: e.key, effect: e.effect, renderer: e.renderer, anim: e.anim, tick: e.tick,
+        ticks: e.ticks, cur: [...e.cur], prev: [...e.prev], follow: e.follow,
+        ...(e.facing ? { facing: e.facing } : {}),
+        ...(held ? { held } : {}),
+      };
+    });
+    const snapshot: EffectsRuntimeSnapshot = { nextKey: this.nextKey, live };
+    if (!validateEffectsRuntimeSnapshot(snapshot)) throw new Error('runtime snapshot: invalid field effects state');
+    return snapshot;
+  }
+
+  /** Resolve all held occupants before replacing the live list; no effect can be half-restored. */
+  restoreRuntimeSnapshot(value: unknown, occupantByKey: (key: string) => Occupant | null): void {
+    if (!validateEffectsRuntimeSnapshot(value)) throw new Error('runtime snapshot: invalid field effects state');
+    const live: Live[] = value.live.map((e) => {
+      const effect = this.reg.fieldEffects.get(e.effect);
+      if (!effect) throw new Error(`runtime snapshot: missing field effect ${e.effect}`);
+      const clip = effect.animations?.[e.anim];
+      if (!clip || (e.held && clip.ticks !== e.held.clip)) {
+        throw new Error(`runtime snapshot: incompatible field effect animation ${e.effect}/${e.anim}`);
+      }
+      let held: Live['held'];
+      if (e.held) {
+        const who = occupantByKey(e.held.occupant);
+        if (!who) throw new Error(`runtime snapshot: missing field effect occupant ${e.held.occupant}`);
+        held = { who, x: e.held.x, z: e.held.z, clip: e.held.clip };
+      }
+      return {
+        key: e.key, effect: e.effect, renderer: e.renderer, anim: e.anim, tick: e.tick,
+        ticks: e.ticks, cur: [...e.cur], prev: [...e.prev], follow: e.follow,
+        ...(e.facing ? { facing: e.facing } : {}),
+        ...(held ? { held } : {}),
+      };
+    });
+    this.live = live;
+    this.nextKey = value.nextKey;
   }
 
   has(key: number | null): boolean {
