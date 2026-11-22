@@ -140,6 +140,16 @@ function inputDir(input: InputFrame): Facing | null {
 
 const vertical = (d: Facing) => d === 'up' || d === 'down';
 
+/** JSON-safe avatar continuation. Effect IDs and actor IDs are resolved by the owning world. */
+export interface AvatarRuntimeSnapshot {
+  speed: number; brake: boolean; movingDir: Facing; moving: boolean;
+  forced: boolean; retainSpeed: boolean; slopeBack: boolean; ignoreTile: boolean;
+  escapedMud: boolean; doNotSink: boolean; onCyclingRoad: boolean; elevated: boolean;
+  task: (Omit<Extract<Task, { kind: 'strength' }>, 'boulder' | 'fall'> & { boulderId: string } | Exclude<Task, { kind: 'strength' }>) | null;
+  mount: number | null; ripple: number | null; override: Vec3 | null;
+  lastStep: Motion | null;
+}
+
 export class Avatar {
   /** Bike speed 0–3 (PlayerAvatar speed); cleared on stops, turns and bumps. */
   speed = 0;
@@ -170,6 +180,71 @@ export class Avatar {
   /** Position override while a waterfall task moves the player off the grid. */
   private override: Vec3 | null = null;
   private lastStep: Motion | null = null;
+
+  /**
+   * Captures every avatar-owned continuation field without touching the hero or effects.
+   * Strength's boulder is stored as a stable world actor key; its generator continuation is
+   * deliberately rejected until DistortionWorld exposes an explicit continuation format.
+   */
+  captureRuntimeSnapshot(actorKey: (actor: Actor) => string | null): AvatarRuntimeSnapshot {
+    let task: AvatarRuntimeSnapshot['task'] = null;
+    if (this.task?.kind === 'strength') {
+      if (this.task.fall) throw new Error('runtime snapshot: Strength boulder fall continuation is unsupported');
+      const boulderId = actorKey(this.task.boulder);
+      if (!boulderId) throw new Error('runtime snapshot: Strength boulder has no stable actor key');
+      const { boulder: _boulder, fall: _fall, ...rest } = this.task;
+      task = { ...rest, boulderId } as AvatarRuntimeSnapshot['task'];
+    } else if (this.task) {
+      task = JSON.parse(JSON.stringify(this.task)) as AvatarRuntimeSnapshot['task'];
+    }
+    return {
+      speed: this.speed, brake: this.brake, movingDir: this.movingDir, moving: this.moving,
+      forced: this.forced, retainSpeed: this.retainSpeed, slopeBack: this.slopeBack,
+      ignoreTile: this.ignoreTile, escapedMud: this.escapedMud, doNotSink: this.doNotSink,
+      onCyclingRoad: this.onCyclingRoad, elevated: this.elevated, task,
+      mount: this.mount, ripple: this.ripple,
+      override: this.override ? [...this.override] : null,
+      lastStep: this.lastStep ? { ...this.lastStep } : null,
+    };
+  }
+
+  /** Validates and restores avatar state in place; the host and hero identities never change. */
+  restoreRuntimeSnapshot(snapshot: AvatarRuntimeSnapshot, actorByKey: (key: string) => Actor | null): void {
+    if (!snapshot || !Number.isInteger(snapshot.speed) || snapshot.speed < 0 || snapshot.speed > 3 ||
+        !['up', 'down', 'left', 'right'].includes(snapshot.movingDir) ||
+        typeof snapshot.moving !== 'boolean' || typeof snapshot.brake !== 'boolean' ||
+        typeof snapshot.forced !== 'boolean' || typeof snapshot.retainSpeed !== 'boolean' ||
+        typeof snapshot.slopeBack !== 'boolean' || typeof snapshot.ignoreTile !== 'boolean' ||
+        typeof snapshot.escapedMud !== 'boolean' || typeof snapshot.doNotSink !== 'boolean' ||
+        typeof snapshot.onCyclingRoad !== 'boolean' || typeof snapshot.elevated !== 'boolean' ||
+        !(snapshot.mount === null || Number.isSafeInteger(snapshot.mount)) ||
+        !(snapshot.ripple === null || Number.isSafeInteger(snapshot.ripple)) ||
+        !(snapshot.override === null || (Array.isArray(snapshot.override) && snapshot.override.length === 3 && snapshot.override.every(Number.isFinite))) ||
+        !(snapshot.lastStep === null || (typeof snapshot.lastStep === 'object' && snapshot.lastStep !== null))) {
+      throw new Error('runtime snapshot: invalid avatar state');
+    }
+    let task: Task | null = null;
+    if (snapshot.task) {
+      const raw = snapshot.task as AvatarRuntimeSnapshot['task'] & { boulderId?: string };
+      if (raw.kind === 'strength') {
+        if (!('boulderId' in raw) || typeof raw.boulderId !== 'string') throw new Error('runtime snapshot: invalid Strength continuation');
+        const boulder = actorByKey(raw.boulderId);
+        if (!boulder) throw new Error(`runtime snapshot: missing Strength boulder ${raw.boulderId}`);
+        task = { kind: 'strength', dir: raw.dir, phase: raw.phase, boulder };
+      } else {
+        task = JSON.parse(JSON.stringify(raw)) as Task;
+      }
+    }
+    // Resolve every reference before mutating this instance.
+    this.speed = snapshot.speed; this.brake = snapshot.brake; this.movingDir = snapshot.movingDir;
+    this.moving = snapshot.moving; this.forced = snapshot.forced; this.retainSpeed = snapshot.retainSpeed;
+    this.slopeBack = snapshot.slopeBack; this.ignoreTile = snapshot.ignoreTile;
+    this.escapedMud = snapshot.escapedMud; this.doNotSink = snapshot.doNotSink;
+    this.onCyclingRoad = snapshot.onCyclingRoad; this.elevated = snapshot.elevated;
+    this.task = task; this.mount = snapshot.mount; this.ripple = snapshot.ripple;
+    this.override = snapshot.override ? [...snapshot.override] : null;
+    this.lastStep = snapshot.lastStep ? { ...snapshot.lastStep } : null;
+  }
 
   constructor(private readonly h: AvatarHost) {}
 
