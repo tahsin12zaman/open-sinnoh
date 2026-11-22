@@ -219,7 +219,7 @@ export function validateAvatarRuntimeSnapshot(value: unknown): value is AvatarRu
       return isFacing(t.dir) && ['walk', 'spin'].includes(String(t.phase)) &&
         Number.isInteger(t.t) && (t.t as number) >= 0;
     case 'dwJump':
-      return ['dir', 'move'].includes(String(t.phase)) && isRecord(t.jump);
+      return ['dir', 'move'].includes(String(t.phase)) && isDwJump(t.jump);
     default: return false;
   }
 }
