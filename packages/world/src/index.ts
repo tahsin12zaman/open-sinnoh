@@ -6,7 +6,7 @@ export { isSurfable, INERT_UNKNOWN } from './behaviours.ts';
 export { FLDEFF } from './effects.ts';
 export { landSlot } from './encounters.ts';
 export { HM_CUT_IN_TICKS } from './avatar.ts';
-export type { AvatarRuntimeSnapshot } from './avatar.ts';
+export { validateAvatarRuntimeSnapshot, type AvatarRuntimeSnapshot } from './avatar.ts';
 export { dailyMarshSpecies, safariEncounterTable, SAFARI_BALLS, SAFARI_STEPS } from './safari.ts';
 export { Lightning } from './weather-tasks.ts';
 
