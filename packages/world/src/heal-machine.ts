@@ -1,3 +1,7 @@
+import type {
+  RuntimeHealMachineSnapshot,
+} from '@opensinnoh/contracts';
+
 /**
  * The healing machines (decomp overlay006/healing_machine_animation/pokecenter.c and hall_of_fame.c,
  * FieldTask_PlayHealingAnimation_*), one task state per 30 Hz tick:
@@ -45,6 +49,38 @@ export class HealMachine {
     private readonly sound?: HealMachineSound,
   ) {
     if (!Number.isInteger(balls) || balls < 1 || balls > MAX_BALLS) throw new Error(`world: healing machine with ${balls} balls (1–${MAX_BALLS})`);
+  }
+
+  capture(): RuntimeHealMachineSnapshot {
+    return {
+      kind: 'heal-machine',
+      balls: this.balls,
+      final: this.final,
+      pattern: this.pattern,
+      state: this.state,
+      placed: this.placed,
+      ballTicks: this.ballTicks,
+      frame: this.frame,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimeHealMachineSnapshot,
+    sound?: HealMachineSound,
+  ): HealMachine {
+    const task = new HealMachine(
+      snapshot.balls,
+      snapshot.final,
+      snapshot.pattern,
+      sound,
+    );
+
+    task.state = snapshot.state;
+    task.placed = snapshot.placed;
+    task.ballTicks = snapshot.ballTicks;
+    task.frame = snapshot.frame;
+
+    return task;
   }
 
   /** One tick; true once the task has finished. */

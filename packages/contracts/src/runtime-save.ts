@@ -115,3 +115,39 @@ export interface RuntimeTeleportTaskSnapshot {
   zoomActive: boolean;
   done: boolean;
 }
+
+export interface RuntimeHealMachineSnapshot {
+  kind: 'heal-machine';
+  balls: number;
+  final: number;
+  pattern: boolean;
+  state:
+    | 'start'
+    | 'add'
+    | 'wait-ball'
+    | 'final'
+    | 'wait-final'
+    | 'clean-up';
+  placed: number;
+  ballTicks: number;
+  frame: number;
+}
+
+export interface RuntimePlatformLiftSnapshot {
+  kind: 'platform-lift';
+  lift: number;
+  position: [number, number];
+  height: number;
+  platePlaced: number;
+  ride: {
+    phase: 'start' | 'move' | 'finish' | 'end';
+    target: number;
+  } | null;
+}
+
+export interface RuntimeWateringTaskSnapshot {
+  kind: 'watering';
+  direction: 'up' | 'down';
+  phase: 'water' | 'input' | 'step' | 'done';
+  timer: number;
+}

@@ -1,4 +1,8 @@
-import type { GameState, Vec3 } from '@opensinnoh/contracts';
+import type {
+  GameState,
+  RuntimePlatformLiftSnapshot,
+  Vec3,
+} from '@opensinnoh/contracts';
 import { TILE } from './tiles.ts';
 
 /**
@@ -82,6 +86,38 @@ export class PlatformLift {
     readonly position: [number, number],
   ) {
     this.height = this.platePlaced = this.config.heights[data.floor === 'bottom' ? 0 : 1];
+  }
+
+  capture(): RuntimePlatformLiftSnapshot {
+    return {
+      kind: 'platform-lift',
+      lift: this.lift,
+      position: [...this.position],
+      height: this.height,
+      platePlaced: this.platePlaced,
+      ride: this.ride
+        ? { ...this.ride }
+        : null,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimePlatformLiftSnapshot,
+    data: NonNullable<GameState['platformLift']>,
+  ): PlatformLift {
+    const lift = new PlatformLift(
+      snapshot.lift,
+      data,
+      [...snapshot.position],
+    );
+
+    lift.height = snapshot.height;
+    lift.platePlaced = snapshot.platePlaced;
+    lift.ride = snapshot.ride
+      ? { ...snapshot.ride }
+      : null;
+
+    return lift;
   }
 
   get config(): LiftConfig {

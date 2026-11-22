@@ -6,7 +6,15 @@
  * task (BerryPatches_TaskMain). The DS tests visibility against its camera (GFXBoxTest); here the DS screen's
  * 16×12 tiles around the player stand in, so a wider view never changes what grows.
  */
-import type { ActorView, BerryPatch, BerryTables, EffectView, Facing, ObjectEvent } from '@opensinnoh/contracts';
+import type {
+  ActorView,
+  BerryPatch,
+  BerryTables,
+  EffectView,
+  Facing,
+  ObjectEvent,
+  RuntimeWateringTaskSnapshot,
+} from '@opensinnoh/contracts';
 import { patchMoisture, waterBerryPatch } from '@opensinnoh/services';
 import type { Id } from '@opensinnoh/core';
 
@@ -92,6 +100,30 @@ export class WateringTask {
     private readonly host: WateringHost,
     readonly direction: 'up' | 'down',
   ) {}
+
+  capture(): RuntimeWateringTaskSnapshot {
+    return {
+      kind: 'watering',
+      direction: this.direction,
+      phase: this.phase,
+      timer: this.timer,
+    };
+  }
+
+  static restore(
+    snapshot: RuntimeWateringTaskSnapshot,
+    host: WateringHost,
+  ): WateringTask {
+    const task = new WateringTask(
+      host,
+      snapshot.direction,
+    );
+
+    task.phase = snapshot.phase;
+    task.timer = snapshot.timer;
+
+    return task;
+  }
 
   get done(): boolean {
     return this.phase === 'done';
