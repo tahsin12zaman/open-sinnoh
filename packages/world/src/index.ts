@@ -8,3 +8,5 @@ export { landSlot } from './encounters.ts';
 export { HM_CUT_IN_TICKS } from './avatar.ts';
 export { dailyMarshSpecies, safariEncounterTable, SAFARI_BALLS, SAFARI_STEPS } from './safari.ts';
 export { Lightning } from './weather-tasks.ts';
+
+export { captureActorSnapshot, restoreActorSnapshot, validateActorSnapshot, type ActorSnapshot } from './actor-snapshot.ts';
