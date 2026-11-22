@@ -40,7 +40,7 @@ import { TELEPORT_FADE_TICKS, TeleportTask } from './teleport.ts';
 import { FieldSound } from './sound.ts';
 import { actorXZ, actorY, jumpHeight, advance, createActor, startAction, wait, walk, type Actor, type Motion } from './npc.ts';
 import { spriteAnimView } from './sprite-anim.ts';
-import { Avatar } from './avatar.ts';
+import { Avatar, type AvatarRuntimeSnapshot } from './avatar.ts';
 import { Effects, grassRenderer } from './effects.ts';
 import { FishingTask, fishingRoll } from './fishing.ts';
 import { activateVisiblePatches, onDsScreen, patchActorView, soilEffect, soilObjects, WateringTask, type PatchObject } from './berry-patches.ts';
@@ -421,12 +421,17 @@ export class FieldWorld implements OpenSinnohWorld {
     actors: { key: number; state: ActorSnapshot }[];
     camera: ActorSnapshot | null;
     cameraTracks: boolean;
+    avatar: AvatarRuntimeSnapshot;
   } {
     return {
       hero: captureActorSnapshot(this.hero),
       actors: [...this.actors].map(([key, actor]) => ({ key, state: captureActorSnapshot(actor) })),
       camera: this.camera ? captureActorSnapshot(this.camera) : null,
       cameraTracks: this.cameraTracks,
+      avatar: this.avatar.captureRuntimeSnapshot((actor) => {
+        for (const [key, candidate] of this.actors) if (candidate === actor) return String(key);
+        return null;
+      }),
     };
   }
 
@@ -441,8 +446,9 @@ export class FieldWorld implements OpenSinnohWorld {
       actors?: unknown;
       camera?: unknown;
       cameraTracks?: unknown;
+      avatar?: unknown;
     };
-    if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) ||
+    if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) || !data.avatar || typeof data.avatar !== 'object' ||
         typeof data.cameraTracks !== 'boolean' ||
         (data.camera !== null && !validateActorSnapshot(data.camera))) {
       throw new Error('Invalid world actor snapshot.');
@@ -464,6 +470,10 @@ export class FieldWorld implements OpenSinnohWorld {
     }
 
     // All references and shapes are preflighted above; these assignments cannot run simulation ticks.
+    this.avatar.restoreRuntimeSnapshot(data.avatar as AvatarRuntimeSnapshot, (id) => {
+      const key = Number(id);
+      return Number.isSafeInteger(key) ? this.actors.get(key) ?? null : null;
+    });
     restoreActorSnapshot(this.hero, data.hero);
     for (const [key, actor] of this.actors) restoreActorSnapshot(actor, entries.get(key)!);
     if (this.camera && data.camera) restoreActorSnapshot(this.camera, data.camera);
