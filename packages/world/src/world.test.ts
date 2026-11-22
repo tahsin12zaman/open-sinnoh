@@ -907,16 +907,15 @@ describe('in-place world runtime actor snapshots', () => {
     g.hold(['up'], 8);
     const snapshot = runtime.captureActorRuntime();
     expect(snapshot.hero).toMatchObject({ x: 38, z: 15 });
-    const tickBefore = g.state.records.counts[RECORD_STEPS] ?? 0;
-
     g.hold(['right'], 8);
     expect(g.state.player).toMatchObject({ x: 39, z: 15 });
+    const tickBeforeRestore = g.state.records.counts[RECORD_STEPS] ?? 0;
     runtime.restoreActorRuntime(snapshot);
     expect(g.state.player).toMatchObject({ x: 38, z: 15 });
     expect(g.world.view().actors.find((actor) => actor.localId === LOCALID_PLAYER)?.cur).toEqual([
       38 * 16 + 8, expect.any(Number), 15 * 16 + 8,
     ]);
-    expect(g.state.records.counts[RECORD_STEPS] ?? 0).toBe(tickBefore);
+    expect(g.state.records.counts[RECORD_STEPS] ?? 0).toBe(tickBeforeRestore);
 
     // Reapplying the same image is idempotent and does not tick the simulation.
     runtime.restoreActorRuntime(snapshot);
