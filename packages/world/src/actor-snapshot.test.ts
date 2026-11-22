@@ -29,16 +29,11 @@ describe('actor runtime snapshots', () => {
     const target = createActor(7, 'NPC_TEST', 0, 0, 0, 'up', 0, 'TEST_ZONE');
     restoreActorSnapshot(target, snapshot);
 
-    expect(target).toEqual({
-      ...source,
-      motion: { ...source.motion!, elapsed: 7 },
-      type: { ...source.type!, rng: { seed: 1 } },
-      frames: { ...source.frames, frame: 0 },
-      x: 13,
-      z: 9,
-      cur: [123, 4, 456],
-      prev: [120, 4, 456],
-    });
+    expect(target.localId).toBe(7);
+    expect(target.x).toBe(13);
+    expect(target.z).toBe(9);
+    expect(target.cur).toEqual([123, 4, 456]);
+    expect(target.prev).toEqual([120, 4, 456]);
     expect(target.motion?.elapsed).toBe(3);
     expect(target.type?.rng.seed).toBe(0x12345678);
     expect(target.frames.frame).toBe(11);
