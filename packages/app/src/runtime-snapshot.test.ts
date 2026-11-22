@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RuntimeSnapshotCoordinator, type RuntimeSnapshotParticipant } from './runtime-snapshot.ts';
-import type { RuntimeJsonValue, RuntimeSnapshotSubsystems } from '@opensinnoh/contracts';
+import type { RuntimeJsonValue } from '@opensinnoh/contracts';
 
 const ids = ['game', 'world', 'vm', 'apps', 'battle', 'audio', 'render'] as const;
 
