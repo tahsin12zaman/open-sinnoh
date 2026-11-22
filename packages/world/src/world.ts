@@ -40,8 +40,8 @@ import { TELEPORT_FADE_TICKS, TeleportTask } from './teleport.ts';
 import { FieldSound } from './sound.ts';
 import { actorXZ, actorY, jumpHeight, advance, createActor, startAction, wait, walk, type Actor, type Motion } from './npc.ts';
 import { spriteAnimView } from './sprite-anim.ts';
-import { Avatar, type AvatarRuntimeSnapshot } from './avatar.ts';
-import { Effects, grassRenderer } from './effects.ts';
+import { Avatar, validateAvatarRuntimeSnapshot, type AvatarRuntimeSnapshot } from './avatar.ts';
+import { Effects, grassRenderer, type EffectsRuntimeSnapshot } from './effects.ts';
 import { FishingTask, fishingRoll } from './fishing.ts';
 import { activateVisiblePatches, onDsScreen, patchActorView, soilEffect, soilObjects, WateringTask, type PatchObject } from './berry-patches.ts';
 import { blocksMovement, isSurfable, isBridge, isBridgeStart, isMud, isMudWithGrass, isVeryTallGrass, onBikeBridgeEW, onBikeBridgeNS, sinkDepth } from './behaviours.ts';
@@ -422,12 +422,20 @@ export class FieldWorld implements OpenSinnohWorld {
     camera: ActorSnapshot | null;
     cameraTracks: boolean;
     avatar: AvatarRuntimeSnapshot;
+    effects: EffectsRuntimeSnapshot;
   } {
     return {
       hero: captureActorSnapshot(this.hero),
       actors: [...this.actors].map(([key, actor]) => ({ key, state: captureActorSnapshot(actor) })),
       camera: this.camera ? captureActorSnapshot(this.camera) : null,
       cameraTracks: this.cameraTracks,
+      effects: this.effects.captureRuntimeSnapshot((who) => {
+        if (who === this.hero) return 'hero';
+        if (who === this.camera) return 'camera';
+        if (who === this.pet.actor) return 'follower';
+        for (const [key, actor] of this.actors) if (actor === who) return `actor:${key}`;
+        return null;
+      }),
       avatar: this.avatar.captureRuntimeSnapshot((actor) => {
         for (const [key, candidate] of this.actors) if (candidate === actor) return String(key);
         return null;
@@ -447,8 +455,9 @@ export class FieldWorld implements OpenSinnohWorld {
       camera?: unknown;
       cameraTracks?: unknown;
       avatar?: unknown;
+      effects?: unknown;
     };
-    if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) || !data.avatar || typeof data.avatar !== 'object' ||
+    if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) || !validateAvatarRuntimeSnapshot(data.avatar) || !data.effects ||
         typeof data.cameraTracks !== 'boolean' ||
         (data.camera !== null && !validateActorSnapshot(data.camera))) {
       throw new Error('Invalid world actor snapshot.');
@@ -468,6 +477,18 @@ export class FieldWorld implements OpenSinnohWorld {
     if ((this.camera === null) !== (data.camera === null)) {
       throw new Error('World camera identity differs from the runtime snapshot.');
     }
+    const occupantByKey = (id: string) => {
+      if (id === 'hero') return this.hero;
+      if (id === 'camera') return this.camera;
+      if (id === 'follower') return this.pet.actor;
+      if (id.startsWith('actor:')) {
+        const key = Number(id.slice('actor:'.length));
+        return Number.isSafeInteger(key) ? this.actors.get(key) ?? null : null;
+      }
+      return null;
+    };
+    const effectsError = this.effects.validateRuntimeSnapshot(data.effects, occupantByKey);
+    if (effectsError) throw new Error(`Invalid world field effects snapshot: ${effectsError}`);
 
     // All references and shapes are preflighted above; these assignments cannot run simulation ticks.
     this.avatar.restoreRuntimeSnapshot(data.avatar as AvatarRuntimeSnapshot, (id) => {
@@ -478,6 +499,7 @@ export class FieldWorld implements OpenSinnohWorld {
     for (const [key, actor] of this.actors) restoreActorSnapshot(actor, entries.get(key)!);
     if (this.camera && data.camera) restoreActorSnapshot(this.camera, data.camera);
     this.cameraTracks = data.cameraTracks;
+    this.effects.restoreRuntimeSnapshot(data.effects, occupantByKey);
   }
 
   // ---------- registry and state helpers ----------
