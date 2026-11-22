@@ -108,8 +108,9 @@ export class RuntimeSnapshotCoordinator {
       const restored: (keyof RuntimeSnapshotSubsystems)[] = [];
       try {
         for (const id of order) {
-          this.participants.get(id)!.restore(valid.subsystems[id], valid.references);
+          // Include the currently executing participant: it may mutate before throwing.
           restored.push(id);
+          this.participants.get(id)!.restore(valid.subsystems[id], valid.references);
         }
       } catch (cause) {
         const rollbackErrors: string[] = [];
