@@ -61,6 +61,7 @@ import { GreatMarshTram } from './gyms/great-marsh.ts';
 import { activateRoamer, roamersAfterBattle, roamersOnContinue, roamerWildSpec, rollRoamerEncounter } from './roamers.ts';
 import { battleWeather, battleScene, partnerWildBattleSetup, VAR_PARTNER_TRAINER_ID, wildBattleSetup } from './battle-setup.ts';
 import { BEHAVIOUR_PUSH_WARP, BEHAVIOUR_STAIRS, BEHAVIOUR_WARP_NORTH, CHUNK_SIZE, CHUNK_TILES, gridOffset, MapGrid, TILE, tileCentre } from './tiles.ts';
+import { captureActorSnapshot, restoreActorSnapshot, validateActorSnapshot, type ActorSnapshot } from './actor-snapshot.ts';
 
 export { TILE, CHUNK_TILES, CHUNK_SIZE } from './tiles.ts';
 
@@ -408,6 +409,65 @@ export class FieldWorld implements OpenSinnohWorld {
       // Fly recalls it too; the map load then brings it back waiting under the player.
       riding: () => !!this.flyTask || !!this.teleportTask || ['surf', 'dismount', 'waterfall', 'rockClimb'].includes(this.avatar.taskKind() ?? ''),
     });
+  }
+
+  /**
+   * Capture the actor graph independently of ordinary save data. Map keys are retained because duplicate
+   * local IDs and feature-owned actors are legal; object references held by tasks remain keyed to the same
+   * live Actor instances during restore.
+   */
+  captureActorRuntime(): {
+    hero: ActorSnapshot;
+    actors: { key: number; state: ActorSnapshot }[];
+    camera: ActorSnapshot | null;
+    cameraTracks: boolean;
+  } {
+    return {
+      hero: captureActorSnapshot(this.hero),
+      actors: [...this.actors].map(([key, actor]) => ({ key, state: captureActorSnapshot(actor) })),
+      camera: this.camera ? captureActorSnapshot(this.camera) : null,
+      cameraTracks: this.cameraTracks,
+    };
+  }
+
+  /**
+   * Validate the complete actor set before changing anything. This restores actor fields in place rather
+   * than respawning actors, which would invalidate task, feature and VM references.
+   */
+  restoreActorRuntime(value: unknown): void {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid world actor snapshot.');
+    const data = value as {
+      hero?: unknown;
+      actors?: unknown;
+      camera?: unknown;
+      cameraTracks?: unknown;
+    };
+    if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) ||
+        typeof data.cameraTracks !== 'boolean' ||
+        (data.camera !== null && !validateActorSnapshot(data.camera))) {
+      throw new Error('Invalid world actor snapshot.');
+    }
+    if (data.actors.length !== this.actors.size) throw new Error('World actor set differs from the runtime snapshot.');
+    const entries = new Map<number, ActorSnapshot>();
+    for (const entry of data.actors) {
+      if (!entry || typeof entry !== 'object') throw new Error('Invalid world actor entry.');
+      const item = entry as { key?: unknown; state?: unknown };
+      if (!Number.isSafeInteger(item.key) || !validateActorSnapshot(item.state) ||
+          entries.has(item.key as number)) throw new Error('Invalid or duplicate world actor entry.');
+      entries.set(item.key as number, item.state);
+    }
+    if ([...this.actors.keys()].some((key) => !entries.has(key))) {
+      throw new Error('World actor identities differ from the runtime snapshot.');
+    }
+    if ((this.camera === null) !== (data.camera === null)) {
+      throw new Error('World camera identity differs from the runtime snapshot.');
+    }
+
+    // All references and shapes are preflighted above; these assignments cannot run simulation ticks.
+    restoreActorSnapshot(this.hero, data.hero);
+    for (const [key, actor] of this.actors) restoreActorSnapshot(actor, entries.get(key)!);
+    if (this.camera && data.camera) restoreActorSnapshot(this.camera, data.camera);
+    this.cameraTracks = data.cameraTracks;
   }
 
   // ---------- registry and state helpers ----------
