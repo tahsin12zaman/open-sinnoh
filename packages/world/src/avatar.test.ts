@@ -60,6 +60,15 @@ describe('avatar runtime continuation validation', () => {
       ...base, task: { kind: 'strength', dir: 'up', phase: 'push', boulderId: 'actor:128', fall: {} },
     })).toBe(false);
     expect(validateAvatarRuntimeSnapshot({ ...base, speed: 4 })).toBe(false);
+    const jump = {
+      facing: 'up', box: { x: 0, y: 0, z: 0, sizeX: 1, sizeY: 1, sizeZ: 1 },
+      displacement: { x: 0, y: 1, z: 0 }, spriteRotation: 0, steps: 8,
+      axis: 'y', inverted: false, finalFacing: 'up', to: 'land', support: null,
+    };
+    expect(validateAvatarRuntimeSnapshot({ ...base, task: { kind: 'dwJump', phase: 'move', jump } })).toBe(true);
+    expect(validateAvatarRuntimeSnapshot({
+      ...base, task: { kind: 'dwJump', phase: 'move', jump: { ...jump, steps: 0 } },
+    })).toBe(false);
   });
 });
 
