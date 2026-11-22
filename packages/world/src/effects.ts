@@ -215,22 +215,27 @@ export class Effects {
     return snapshot;
   }
 
+  /** Preflight registry compatibility and every stable occupant reference without mutating effects. */
+  validateRuntimeSnapshot(value: unknown, occupantByKey: (key: string) => Occupant | null): string | null {
+    if (!validateEffectsRuntimeSnapshot(value)) return 'invalid field effects state';
+    for (const e of value.live) {
+      const effect = this.reg.fieldEffects.get(e.effect);
+      if (!effect) return `missing field effect ${e.effect}`;
+      const clip = effect.animations?.[e.anim];
+      if (!clip || (e.held && clip.ticks !== e.held.clip)) return `incompatible field effect animation ${e.effect}/${e.anim}`;
+      if (e.held && !occupantByKey(e.held.occupant)) return `missing field effect occupant ${e.held.occupant}`;
+    }
+    return null;
+  }
+
   /** Resolve all held occupants before replacing the live list; no effect can be half-restored. */
   restoreRuntimeSnapshot(value: unknown, occupantByKey: (key: string) => Occupant | null): void {
-    if (!validateEffectsRuntimeSnapshot(value)) throw new Error('runtime snapshot: invalid field effects state');
-    const live: Live[] = value.live.map((e) => {
-      const effect = this.reg.fieldEffects.get(e.effect);
-      if (!effect) throw new Error(`runtime snapshot: missing field effect ${e.effect}`);
-      const clip = effect.animations?.[e.anim];
-      if (!clip || (e.held && clip.ticks !== e.held.clip)) {
-        throw new Error(`runtime snapshot: incompatible field effect animation ${e.effect}/${e.anim}`);
-      }
+    const error = this.validateRuntimeSnapshot(value, occupantByKey);
+    if (error) throw new Error(`runtime snapshot: ${error}`);
+    const snapshot = value as EffectsRuntimeSnapshot;
+    const live: Live[] = snapshot.live.map((e) => {
       let held: Live['held'];
-      if (e.held) {
-        const who = occupantByKey(e.held.occupant);
-        if (!who) throw new Error(`runtime snapshot: missing field effect occupant ${e.held.occupant}`);
-        held = { who, x: e.held.x, z: e.held.z, clip: e.held.clip };
-      }
+      if (e.held) held = { who: occupantByKey(e.held.occupant)!, x: e.held.x, z: e.held.z, clip: e.held.clip };
       return {
         key: e.key, effect: e.effect, renderer: e.renderer, anim: e.anim, tick: e.tick,
         ticks: e.ticks, cur: [...e.cur], prev: [...e.prev], follow: e.follow,
@@ -239,7 +244,7 @@ export class Effects {
       };
     });
     this.live = live;
-    this.nextKey = value.nextKey;
+    this.nextKey = snapshot.nextKey;
   }
 
   has(key: number | null): boolean {
