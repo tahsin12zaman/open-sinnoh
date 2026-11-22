@@ -48,7 +48,7 @@ export function validateActorSnapshot(value: unknown): value is ActorSnapshot {
     if (m.jumpInverted !== undefined && typeof m.jumpInverted !== 'boolean') return false;
     if (m.fromY !== undefined && !isFiniteNumber(m.fromY)) return false;
     if (m.endPose !== undefined && !['up', 'down', 'left', 'right'].includes(String(m.endPose))) return false;
-    if (m.lift !== undefined && !['warp-in', 'warp-out', 'jump'].includes(String(m.lift))) return false;
+    if (m.lift !== undefined && !['warp-in', 'warp-out', 'reveal'].includes(String(m.lift))) return false;
   }
   if (value.type !== null) {
     const t = value.type;
