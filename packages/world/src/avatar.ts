@@ -162,6 +162,21 @@ function isVec3(value: unknown): value is Vec3 {
   return Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number' && Number.isFinite(n));
 }
 
+function isDwJump(value: unknown): value is DwJump {
+  if (!isRecord(value)) return false;
+  const box = value.box, displacement = value.displacement;
+  const validBox = isRecord(box) && ['x', 'y', 'z', 'sizeX', 'sizeY', 'sizeZ']
+    .every((key) => Number.isFinite(box[key]) && Number.isInteger(box[key]));
+  const validDisplacement = isRecord(displacement) && ['x', 'y', 'z']
+    .every((key) => Number.isFinite(displacement[key]) && Number.isInteger(displacement[key]));
+  return isFacing(value.facing) && validBox && validDisplacement &&
+    Number.isFinite(value.spriteRotation) && Number.isInteger(value.steps) && (value.steps as number) > 0 &&
+    ['x', 'y', 'z'].includes(String(value.axis)) && typeof value.inverted === 'boolean' &&
+    isFacing(value.finalFacing) &&
+    ['floor', 'west-wall', 'east-wall', 'ceiling', 'land'].includes(String(value.to)) &&
+    (value.support === null || (Number.isInteger(value.support) && (value.support as number) >= 0));
+}
+
 /** Complete preflight for the avatar continuation, including tagged task payloads. */
 export function validateAvatarRuntimeSnapshot(value: unknown): value is AvatarRuntimeSnapshot {
   if (!isRecord(value) || !Number.isInteger(value.speed) || (value.speed as number) < 0 || (value.speed as number) > 3 ||
