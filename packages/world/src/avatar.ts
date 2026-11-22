@@ -174,12 +174,12 @@ export function validateAvatarRuntimeSnapshot(value: unknown): value is AvatarRu
 
   if (value.lastStep !== null) {
     const m = value.lastStep;
-    if (!isRecord(m) || !['walk', 'jump', 'slide'].includes(String(m.kind)) ||
+    if (!isRecord(m) || !['walk', 'onspot', 'wait'].includes(String(m.kind)) ||
         !Number.isInteger(m.ticks) || (m.ticks as number) <= 0 ||
         !Number.isInteger(m.elapsed) || (m.elapsed as number) < 0 || (m.elapsed as number) > (m.ticks as number) ||
         !['walk', 'run', 'stand'].includes(String(m.anim)) ||
         !Number.isFinite(m.fromX) || !Number.isFinite(m.fromZ) ||
-        !['input', 'forced', 'script', 'type'].includes(String(m.source))) return false;
+        !['input', 'script', 'follow', 'auto', 'type', 'approach'].includes(String(m.source))) return false;
   }
 
   if (value.task === null) return true;
