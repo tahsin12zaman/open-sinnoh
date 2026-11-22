@@ -102,7 +102,7 @@ export function validateEffectsRuntimeSnapshot(value: unknown): value is Effects
         keys.has(item.key as number) || typeof item.effect !== 'string' ||
         !Number.isInteger(item.renderer) || typeof item.anim !== 'string' || !item.anim ||
         !Number.isInteger(item.tick) || (item.tick as number) < 0 ||
-        !(item.ticks === null || (Number.isInteger(item.ticks) && (item.ticks as number) > 0 && item.tick < item.ticks)) ||
+        !(item.ticks === null || (Number.isInteger(item.ticks) && (item.ticks as number) > 0 && (item.tick as number) < (item.ticks as number))) ||
         !vec3(item.cur) || !vec3(item.prev) || typeof item.follow !== 'boolean' ||
         (item.facing !== undefined && !['up', 'down', 'left', 'right'].includes(String(item.facing)))) return false;
     keys.add(item.key as number);
@@ -112,7 +112,7 @@ export function validateEffectsRuntimeSnapshot(value: unknown): value is Effects
       if (!record(h) || typeof h.occupant !== 'string' || !h.occupant ||
           !Number.isFinite(h.x) || !Number.isFinite(h.z) ||
           !Number.isInteger(h.clip) || (h.clip as number) <= 0 ||
-          item.ticks !== null || item.tick >= h.clip) return false;
+          item.ticks !== null || (item.tick as number) >= (h.clip as number)) return false;
     }
   }
   return (value.nextKey as number) > maxKey;
