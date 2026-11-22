@@ -6,6 +6,7 @@ export * from './state.ts';
 export * from './bridge.ts';
 export * from './runtime.ts';
 export * from './runtime-save.ts';
+export * from './runtime-snapshot.ts';
 export * from './state-edits.ts';
 export * from './battle.ts';
 export * from './apps.ts';
