@@ -112,7 +112,7 @@ export function validateEffectsRuntimeSnapshot(value: unknown): value is Effects
       if (!record(h) || typeof h.occupant !== 'string' || !h.occupant ||
           !Number.isFinite(h.x) || !Number.isFinite(h.z) ||
           !Number.isInteger(h.clip) || (h.clip as number) <= 0 ||
-          item.ticks !== null || (item.tick as number) >= (h.clip as number)) return false;
+          item.ticks !== null) return false;
     }
   }
   return (value.nextKey as number) > maxKey;
