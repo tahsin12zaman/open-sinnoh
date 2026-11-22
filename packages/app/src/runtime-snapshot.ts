@@ -87,16 +87,46 @@ export class RuntimeSnapshotCoordinator {
   restore(snapshot: unknown, order: (keyof RuntimeSnapshotSubsystems)[] = [
     'game', 'world', 'vm', 'apps', 'battle', 'audio', 'render',
   ]): number {
-    const valid = this.validate(snapshot);
-    if (new Set(order).size !== order.length || order.length !== this.participants.size ||
-        order.some((id) => !this.participants.has(id))) {
-      throw new Error('Runtime snapshot restore order must contain every subsystem exactly once.');
-    }
-    for (const id of order) {
-      const participant = this.participants.get(id)!;
-      participant.restore(valid.subsystems[id], valid.references);
-    }
-    return valid.tick;
+    return this.options.boundary.atTickBoundary(() => {
+      const valid = this.validate(snapshot);
+      if (new Set(order).size !== order.length || order.length !== this.participants.size ||
+          order.some((id) => !this.participants.has(id))) {
+        throw new Error('Runtime snapshot restore order must contain every subsystem exactly once.');
+      }
+
+      // Take a rollback image before mutation. If any participant unexpectedly throws during
+      // restore, put already-mutated participants back in reverse dependency order.
+      const rollback = new Map<keyof RuntimeSnapshotSubsystems, RuntimeJsonValue>();
+      for (const id of order) {
+        const participant = this.participants.get(id)!;
+        const payload = participant.capture();
+        const error = participant.validate(payload, valid.references);
+        if (error) throw new Error(`Cannot establish rollback state for "${id}": ${error}`);
+        rollback.set(id, payload);
+      }
+
+      const restored: (keyof RuntimeSnapshotSubsystems)[] = [];
+      try {
+        for (const id of order) {
+          this.participants.get(id)!.restore(valid.subsystems[id], valid.references);
+          restored.push(id);
+        }
+      } catch (cause) {
+        const rollbackErrors: string[] = [];
+        for (const id of restored.reverse()) {
+          try {
+            this.participants.get(id)!.restore(rollback.get(id)!, valid.references);
+          } catch (error) {
+            rollbackErrors.push(`${id}: ${String(error)}`);
+          }
+        }
+        if (rollbackErrors.length) {
+          throw new AggregateError([cause, ...rollbackErrors], 'Runtime restore failed and rollback was incomplete.');
+        }
+        throw cause;
+      }
+      return valid.tick;
+    });
   }
 
   serialize(snapshot: RuntimeSnapshot = this.capture()): string {
