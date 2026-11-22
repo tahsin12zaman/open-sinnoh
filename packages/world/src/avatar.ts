@@ -150,6 +150,65 @@ export interface AvatarRuntimeSnapshot {
   lastStep: Motion | null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFacing(value: unknown): value is Facing {
+  return value === 'up' || value === 'down' || value === 'left' || value === 'right';
+}
+
+function isVec3(value: unknown): value is Vec3 {
+  return Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number' && Number.isFinite(n));
+}
+
+/** Complete preflight for the avatar continuation, including tagged task payloads. */
+export function validateAvatarRuntimeSnapshot(value: unknown): value is AvatarRuntimeSnapshot {
+  if (!isRecord(value) || !Number.isInteger(value.speed) || (value.speed as number) < 0 || (value.speed as number) > 3 ||
+      !isFacing(value.movingDir) ||
+      !['brake', 'moving', 'forced', 'retainSpeed', 'slopeBack', 'ignoreTile', 'escapedMud', 'doNotSink', 'onCyclingRoad', 'elevated']
+        .every((key) => typeof value[key] === 'boolean') ||
+      !(value.mount === null || Number.isSafeInteger(value.mount)) ||
+      !(value.ripple === null || Number.isSafeInteger(value.ripple)) ||
+      !(value.override === null || isVec3(value.override))) return false;
+
+  if (value.lastStep !== null) {
+    const m = value.lastStep;
+    if (!isRecord(m) || !['walk', 'jump', 'slide'].includes(String(m.kind)) ||
+        !Number.isInteger(m.ticks) || (m.ticks as number) <= 0 ||
+        !Number.isInteger(m.elapsed) || (m.elapsed as number) < 0 || (m.elapsed as number) > (m.ticks as number) ||
+        !['walk', 'run', 'stand'].includes(String(m.anim)) ||
+        !Number.isFinite(m.fromX) || !Number.isFinite(m.fromZ) ||
+        !['input', 'forced', 'script', 'type'].includes(String(m.source))) return false;
+  }
+
+  if (value.task === null) return true;
+  const t = value.task;
+  if (!isRecord(t) || typeof t.kind !== 'string') return false;
+  switch (t.kind) {
+    case 'surf': return isFacing(t.dir) && ['cut-in', 'jump'].includes(String(t.phase));
+    case 'dismount': return isFacing(t.dir) && ['start', 'jump'].includes(String(t.phase));
+    case 'waterfall':
+      return (t.dir === 'up' || t.dir === 'down') && ['cut-in', 'move'].includes(String(t.phase)) &&
+        Number.isInteger(t.t) && (t.t as number) >= 0 && isVec3(t.from) && isVec3(t.to) &&
+        Number.isFinite(t.tx) && Number.isFinite(t.tz);
+    case 'rockClimb':
+      return isFacing(t.dir) && ['cut-in', 'hop-on', 'move', 'hop-off'].includes(String(t.phase));
+    case 'strength':
+      return isFacing(t.dir) && ['wait', 'push'].includes(String(t.phase)) &&
+        typeof t.boulderId === 'string' && t.boulderId.length > 0 && !('fall' in t);
+    case 'mud':
+      return Number.isInteger(t.count) && (t.count as number) >= 0 && (t.count as number) <= MUD_WIGGLES &&
+        ['ready', 'input'].includes(String(t.phase));
+    case 'slide':
+      return isFacing(t.dir) && ['walk', 'spin'].includes(String(t.phase)) &&
+        Number.isInteger(t.t) && (t.t as number) >= 0;
+    case 'dwJump':
+      return ['dir', 'move'].includes(String(t.phase)) && isRecord(t.jump);
+    default: return false;
+  }
+}
+
 export class Avatar {
   /** Bike speed 0–3 (PlayerAvatar speed); cleared on stops, turns and bumps. */
   speed = 0;
@@ -210,18 +269,8 @@ export class Avatar {
 
   /** Validates and restores avatar state in place; the host and hero identities never change. */
   restoreRuntimeSnapshot(snapshot: AvatarRuntimeSnapshot, actorByKey: (key: string) => Actor | null): void {
-    if (!snapshot || !Number.isInteger(snapshot.speed) || snapshot.speed < 0 || snapshot.speed > 3 ||
-        !['up', 'down', 'left', 'right'].includes(snapshot.movingDir) ||
-        typeof snapshot.moving !== 'boolean' || typeof snapshot.brake !== 'boolean' ||
-        typeof snapshot.forced !== 'boolean' || typeof snapshot.retainSpeed !== 'boolean' ||
-        typeof snapshot.slopeBack !== 'boolean' || typeof snapshot.ignoreTile !== 'boolean' ||
-        typeof snapshot.escapedMud !== 'boolean' || typeof snapshot.doNotSink !== 'boolean' ||
-        typeof snapshot.onCyclingRoad !== 'boolean' || typeof snapshot.elevated !== 'boolean' ||
-        !(snapshot.mount === null || Number.isSafeInteger(snapshot.mount)) ||
-        !(snapshot.ripple === null || Number.isSafeInteger(snapshot.ripple)) ||
-        !(snapshot.override === null || (Array.isArray(snapshot.override) && snapshot.override.length === 3 && snapshot.override.every(Number.isFinite))) ||
-        !(snapshot.lastStep === null || (typeof snapshot.lastStep === 'object' && snapshot.lastStep !== null))) {
-      throw new Error('runtime snapshot: invalid avatar state');
+    if (!validateAvatarRuntimeSnapshot(snapshot)) {
+      throw new Error('runtime snapshot: invalid avatar state or task continuation');
     }
     let task: Task | null = null;
     if (snapshot.task) {
