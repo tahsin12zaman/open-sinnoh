@@ -895,3 +895,32 @@ describe('screen fades', () => {
     expect(world.fadeDone()).toBe(true);
   });
 });
+
+
+describe('in-place world runtime actor snapshots', () => {
+  it('restores the hero, actors, avatar and field-effect continuation without advancing a tick', () => {
+    const g = setup(newState('TOWN', 38, 16));
+    const runtime = g.world as typeof g.world & {
+      captureActorRuntime(): { hero: { x: number; z: number }; effects: { nextKey: number; live: unknown[] } };
+      restoreActorRuntime(value: unknown): void;
+    };
+    g.hold(['up'], 8);
+    const snapshot = runtime.captureActorRuntime();
+    expect(snapshot.hero).toMatchObject({ x: 38, z: 15 });
+    const tickBefore = g.state.records.counts[RECORD_STEPS] ?? 0;
+
+    g.hold(['right'], 8);
+    expect(g.state.player).toMatchObject({ x: 39, z: 15 });
+    runtime.restoreActorRuntime(snapshot);
+    expect(g.state.player).toMatchObject({ x: 38, z: 15 });
+    expect(g.world.view().actors.find((actor) => actor.localId === LOCALID_PLAYER)).toMatchObject({
+      x: 38, z: 15,
+    });
+    expect(g.state.records.counts[RECORD_STEPS] ?? 0).toBe(tickBefore);
+
+    // Reapplying the same image is idempotent and does not tick the simulation.
+    runtime.restoreActorRuntime(snapshot);
+    expect(g.state.player).toMatchObject({ x: 38, z: 15 });
+    expect(snapshot.effects).toMatchObject({ nextKey: expect.any(Number), live: expect.any(Array) });
+  });
+});
