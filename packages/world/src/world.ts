@@ -500,6 +500,7 @@ export class FieldWorld implements OpenSinnohWorld {
     if (this.camera && data.camera) restoreActorSnapshot(this.camera, data.camera);
     this.cameraTracks = data.cameraTracks;
     this.effects.restoreRuntimeSnapshot(data.effects, occupantByKey);
+    this.syncState();
   }
 
   // ---------- registry and state helpers ----------
