@@ -1,4 +1,5 @@
 import type { FieldSound } from './sound.ts';
+import type { BoulderFallState } from './distortion/boulders.ts';
 import type { Id } from '@opensinnoh/core';
 import type { Facing, GameState, InputFrame, Registries, StubLog, Vec3 } from '@opensinnoh/contracts';
 import { BUMP_TICKS, DELTA, OPPOSITE, RUN_TICKS, TURN_TICKS, WALK_NORMAL_TICKS, WALK_SLOW_TICKS } from './movement.ts';
@@ -92,7 +93,7 @@ type Task =
   | { kind: 'dismount'; dir: Facing; phase: 'start' | 'jump' }
   | { kind: 'waterfall'; dir: 'up' | 'down'; phase: 'cut-in' | 'move'; t: number; from: Vec3; to: Vec3; tx: number; tz: number }
   | { kind: 'rockClimb'; dir: Facing; phase: 'cut-in' | 'hop-on' | 'move' | 'hop-off' }
-  | { kind: 'strength'; dir: Facing; boulder: Actor; phase: 'wait' | 'push'; fall?: Generator<void, void, void> }
+  | { kind: 'strength'; dir: Facing; boulder: Actor; phase: 'wait' | 'push'; fall?: BoulderFallState }
   | { kind: 'mud'; count: number; phase: 'ready' | 'input' }
   | { kind: 'slide'; dir: Facing; phase: 'walk' | 'spin'; t: number }
   /** JumpOnFloatingPlatform (overlay 9): a Distortion World jump point's jump to a support or the land. */
@@ -145,7 +146,7 @@ export interface AvatarRuntimeSnapshot {
   speed: number; brake: boolean; movingDir: Facing; moving: boolean;
   forced: boolean; retainSpeed: boolean; slopeBack: boolean; ignoreTile: boolean;
   escapedMud: boolean; doNotSink: boolean; onCyclingRoad: boolean; elevated: boolean;
-  task: (Omit<Extract<Task, { kind: 'strength' }>, 'boulder' | 'fall'> & { boulderId: string } | Exclude<Task, { kind: 'strength' }>) | null;
+  task: (Omit<Extract<Task, { kind: 'strength' }>, 'boulder' | 'fall'> & { boulderId: string; fall?: BoulderFallState } | Exclude<Task, { kind: 'strength' }>) | null;
   mount: number | null; ripple: number | null; override: Vec3 | null;
   lastStep: Motion | null;
 }
@@ -209,9 +210,29 @@ export function validateAvatarRuntimeSnapshot(value: unknown): value is AvatarRu
         Number.isFinite(t.tx) && Number.isFinite(t.tz);
     case 'rockClimb':
       return isFacing(t.dir) && ['cut-in', 'hop-on', 'move', 'hop-off'].includes(String(t.phase));
-    case 'strength':
+    case 'strength': {
+      const validStep = (n: unknown, max: number) =>
+        typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= max;
+      const validFall = (fall: unknown): fall is BoulderFallState => {
+        if (!isRecord(fall)) return false;
+        if (fall.kind === 'toB6F') return true;
+        if (![128, 129, 130].includes(Number(fall.boulderId)) || !isFacing(fall.pushed)) return false;
+        if (fall.kind === 'correctPit') {
+          return [6, 7, 8].includes(Number(fall.pit)) &&
+            ['tip', 'shake', 'script'].includes(String(fall.phase)) &&
+            validStep(fall.tipStep, 12) && validStep(fall.shakeStep, 32) &&
+            typeof fall.shakeBase === 'number' && Number.isFinite(fall.shakeBase);
+        }
+        if (fall.kind === 'wrongPit') {
+          return ['tip', 'drop'].includes(String(fall.phase)) &&
+            validStep(fall.tipStep, 12) && validStep(fall.dropStep, 40);
+        }
+        return false;
+      };
       return isFacing(t.dir) && ['wait', 'push'].includes(String(t.phase)) &&
-        typeof t.boulderId === 'string' && t.boulderId.length > 0 && !('fall' in t);
+        typeof t.boulderId === 'string' && t.boulderId.length > 0 &&
+        (!('fall' in t) || validFall(t.fall));
+    }
     case 'mud':
       return Number.isInteger(t.count) && (t.count as number) >= 0 && (t.count as number) <= MUD_WIGGLES &&
         ['ready', 'input'].includes(String(t.phase));
@@ -257,17 +278,16 @@ export class Avatar {
 
   /**
    * Captures every avatar-owned continuation field without touching the hero or effects.
-   * Strength's boulder is stored as a stable world actor key; its generator continuation is
-   * deliberately rejected until DistortionWorld exposes an explicit continuation format.
+   * Strength's boulder is stored as a stable world actor key, and its fall continuation
+   * is captured as a serializable state-machine value.
    */
   captureRuntimeSnapshot(actorKey: (actor: Actor) => string | null): AvatarRuntimeSnapshot {
     let task: AvatarRuntimeSnapshot['task'] = null;
     if (this.task?.kind === 'strength') {
-      if (this.task.fall) throw new Error('runtime snapshot: Strength boulder fall continuation is unsupported');
       const boulderId = actorKey(this.task.boulder);
       if (!boulderId) throw new Error('runtime snapshot: Strength boulder has no stable actor key');
-      const { boulder: _boulder, fall: _fall, ...rest } = this.task;
-      task = { ...rest, boulderId } as AvatarRuntimeSnapshot['task'];
+      const { boulder: _boulder, ...rest } = this.task;
+      task = JSON.parse(JSON.stringify({ ...rest, boulderId })) as AvatarRuntimeSnapshot['task'];
     } else if (this.task) {
       task = JSON.parse(JSON.stringify(this.task)) as AvatarRuntimeSnapshot['task'];
     }
@@ -294,7 +314,13 @@ export class Avatar {
         if (!('boulderId' in raw) || typeof raw.boulderId !== 'string') throw new Error('runtime snapshot: invalid Strength continuation');
         const boulder = actorByKey(raw.boulderId);
         if (!boulder) throw new Error(`runtime snapshot: missing Strength boulder ${raw.boulderId}`);
-        task = { kind: 'strength', dir: raw.dir, phase: raw.phase, boulder };
+        task = {
+          kind: 'strength',
+          dir: raw.dir,
+          phase: raw.phase,
+          boulder,
+          ...('fall' in raw ? { fall: raw.fall as BoulderFallState } : {}),
+        };
       } else {
         task = JSON.parse(JSON.stringify(raw)) as Task;
       }
@@ -1083,12 +1109,15 @@ export class Avatar {
           return;
         }
         if (t.fall) {
-          if (t.fall.next().done) this.task = null;
+          const distortion = this.h.distortion();
+          if (!distortion) return;
+          t.fall = distortion.stepBoulderFall(t.boulder, t.fall) ?? undefined;
+          if (!t.fall) this.task = null;
           return;
         }
         if (t.boulder.motion || p.motion) return;
         // The boulder stops on a fall location: it falls (DistWorldFallingBoulder_New / _Tick) before the task ends.
-        t.fall = this.h.distortion()?.boulderFall(t.boulder, t.dir) ?? undefined;
+        t.fall = this.h.distortion()?.beginBoulderFall(t.boulder, t.dir) ?? undefined;
         if (!t.fall) this.task = null;
         return;
       case 'mud': {

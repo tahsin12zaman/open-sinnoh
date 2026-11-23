@@ -423,7 +423,11 @@ export class FieldWorld implements OpenSinnohWorld {
     cameraTracks: boolean;
     avatar: AvatarRuntimeSnapshot;
     effects: EffectsRuntimeSnapshot;
+    feature: unknown | null;
   } {
+    if (this.feature && (!this.feature.captureRuntimeSnapshot || !this.feature.validateRuntimeSnapshot || !this.feature.restoreRuntimeSnapshot)) {
+      throw new Error('The active map feature does not support exact runtime snapshots.');
+    }
     return {
       hero: captureActorSnapshot(this.hero),
       actors: [...this.actors].map(([key, actor]) => ({ key, state: captureActorSnapshot(actor) })),
@@ -440,6 +444,7 @@ export class FieldWorld implements OpenSinnohWorld {
         for (const [key, candidate] of this.actors) if (candidate === actor) return String(key);
         return null;
       }),
+      feature: this.feature ? this.feature.captureRuntimeSnapshot!() : null,
     };
   }
 
@@ -456,6 +461,7 @@ export class FieldWorld implements OpenSinnohWorld {
       cameraTracks?: unknown;
       avatar?: unknown;
       effects?: unknown;
+      feature?: unknown;
     };
     if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) || !validateAvatarRuntimeSnapshot(data.avatar) || !data.effects ||
         typeof data.cameraTracks !== 'boolean' ||
@@ -489,6 +495,16 @@ export class FieldWorld implements OpenSinnohWorld {
     };
     const effectsError = this.effects.validateRuntimeSnapshot(data.effects, occupantByKey);
     if (effectsError) throw new Error(`Invalid world field effects snapshot: ${effectsError}`);
+    if ((this.feature === null) !== (data.feature === null)) {
+      throw new Error('World map-feature identity differs from the runtime snapshot.');
+    }
+    if (this.feature) {
+      if (!this.feature.validateRuntimeSnapshot || !this.feature.restoreRuntimeSnapshot) {
+        throw new Error('The active map feature cannot restore runtime snapshots.');
+      }
+      const featureError = this.feature.validateRuntimeSnapshot(data.feature);
+      if (featureError) throw new Error(`Invalid world map-feature snapshot: ${featureError}`);
+    }
 
     // All references and shapes are preflighted above; these assignments cannot run simulation ticks.
     this.avatar.restoreRuntimeSnapshot(data.avatar as AvatarRuntimeSnapshot, (id) => {
@@ -500,6 +516,7 @@ export class FieldWorld implements OpenSinnohWorld {
     if (this.camera && data.camera) restoreActorSnapshot(this.camera, data.camera);
     this.cameraTracks = data.cameraTracks;
     this.effects.restoreRuntimeSnapshot(data.effects, occupantByKey);
+    if (this.feature && data.feature !== null) this.feature.restoreRuntimeSnapshot!(data.feature);
     this.syncState();
   }
 

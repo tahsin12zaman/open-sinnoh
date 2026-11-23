@@ -40,6 +40,13 @@ export interface MapFeature {
    * tile and the facing start a script of the feature (the Villa's furniture: FieldSystem_TrySetVillaFurnitureScript).
    */
   interact?(x: number, z: number, facing: Facing): Id | null;
+  /**
+   * Optional live-runtime snapshot hooks. These are deliberately separate from the persistent map-feature slot:
+   * implementations must capture continuation state and reject snapshots they cannot restore exactly.
+   */
+  captureRuntimeSnapshot?(): unknown;
+  validateRuntimeSnapshot?(value: unknown): string | null;
+  restoreRuntimeSnapshot?(value: unknown): void;
   /** One tick of the feature's task, if any (before the actors move). */
   step(): void;
   /** A task runs: the field is not idle and the player takes no input. */

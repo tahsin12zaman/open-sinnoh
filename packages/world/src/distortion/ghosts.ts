@@ -55,6 +55,20 @@ function bobStart(zone: Id, i: number): number {
   return (h >>> 0) % (8 * FX);
 }
 
+export interface GhostsRuntimeSnapshot {
+  zone: Id;
+  props: {
+    group: number;
+    prop: DwPropKind;
+    opacity: number;
+    progress: number;
+    delta: number;
+    frame: number;
+    bob: number;
+    sound: GhostProp['sound'];
+  }[];
+}
+
 export class Ghosts {
   private readonly props: GhostProp[];
 
@@ -145,6 +159,49 @@ export class Ghosts {
           sound.playNamed(SOUNDS.platform, true);
         }
       }
+    });
+  }
+
+  captureRuntimeSnapshot(): GhostsRuntimeSnapshot {
+    return {
+      zone: this.zone,
+      props: this.props.map(({ group, prop, opacity, progress, delta, frame, bob, sound }) => ({
+        group, prop, opacity, progress, delta, frame, bob, sound,
+      })),
+    };
+  }
+
+  validateRuntimeSnapshot(value: unknown): string | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return 'snapshot must be an object';
+    const s = value as Partial<GhostsRuntimeSnapshot>;
+    if (s.zone !== this.zone) return `ghost zone mismatch: expected ${this.zone}`;
+    if (!Array.isArray(s.props) || s.props.length !== this.props.length) return 'ghost prop count mismatch';
+    for (let i = 0; i < this.props.length; i++) {
+      const saved = s.props[i];
+      const current = this.props[i]!;
+      if (!saved || saved.group !== current.group || saved.prop !== current.prop) return `ghost prop identity mismatch at ${i}`;
+      if (!Number.isSafeInteger(saved.opacity) || saved.opacity < 0 || saved.opacity > GHOST_OPACITY_MAX) return `invalid ghost opacity at ${i}`;
+      if (!Number.isSafeInteger(saved.progress) || saved.progress < 0 || saved.progress >= 8 * FX) return `invalid ghost progress at ${i}`;
+      if (saved.delta !== BOB_DELTA && saved.delta !== -BOB_DELTA) return `invalid ghost delta at ${i}`;
+      if (!Number.isSafeInteger(saved.frame) || saved.frame < 0) return `invalid ghost frame at ${i}`;
+      if (!Number.isSafeInteger(saved.bob)) return `invalid ghost bob at ${i}`;
+      if (saved.sound !== 'none' && saved.sound !== 'appear' && saved.sound !== 'disappear') return `invalid ghost sound at ${i}`;
+    }
+    return null;
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    const error = this.validateRuntimeSnapshot(value);
+    if (error) throw new Error(`Invalid ghosts runtime snapshot: ${error}`);
+    const s = value as GhostsRuntimeSnapshot;
+    s.props.forEach((saved, i) => {
+      const current = this.props[i]!;
+      current.opacity = saved.opacity;
+      current.progress = saved.progress;
+      current.delta = saved.delta;
+      current.frame = saved.frame;
+      current.bob = saved.bob;
+      current.sound = saved.sound;
     });
   }
 

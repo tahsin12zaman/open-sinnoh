@@ -8,6 +8,18 @@ const yaw: Record<Facing, number> = { up: 180, down: 0, left: 270, right: 90 };
 const bob = (tick: number) => 1 + Math.min(tick % 24, 24 - tick % 24) / 4;
 
 /** The cascade owns these visual accumulators; none are persisted or used for collision. */
+export interface CascadeMountRuntimeSnapshot {
+  down: boolean;
+  angleX: number;
+  angleY: number;
+  orbit: number;
+  fixZ: number;
+  cameraSteps: [number, number];
+  bobX: number;
+  bobFix: number;
+  externalBob: boolean;
+}
+
 export class CascadeMount {
   private angleX: number;
   private angleY = 90 * FX;
@@ -55,6 +67,47 @@ export class CascadeMount {
     this.angleX += (this.down ? -90 : 90) * FX / frames;
     this.orbit += (this.down ? -110 : 70) * FX / frames;
     this.fixZ += (this.down ? -7 : -4) * FX / frames;
+  }
+
+  captureRuntimeSnapshot(): CascadeMountRuntimeSnapshot {
+    return {
+      down: this.down,
+      angleX: this.angleX,
+      angleY: this.angleY,
+      orbit: this.orbit,
+      fixZ: this.fixZ,
+      cameraSteps: [this.cameraSteps[0]!, this.cameraSteps[1]!],
+      bobX: this.bobX,
+      bobFix: this.bobFix,
+      externalBob: this.externalBob,
+    };
+  }
+
+  validateRuntimeSnapshot(value: unknown): string | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return 'snapshot must be an object';
+    const s = value as Partial<CascadeMountRuntimeSnapshot>;
+    if (s.down !== this.down) return 'cascade direction mismatch';
+    for (const key of ['angleX', 'angleY', 'orbit', 'fixZ', 'bobX', 'bobFix'] as const) {
+      if (typeof s[key] !== 'number' || !Number.isFinite(s[key])) return `invalid ${key}`;
+    }
+    if (!Array.isArray(s.cameraSteps) || s.cameraSteps.length !== 2 ||
+        !s.cameraSteps.every((v) => Number.isSafeInteger(v) && v >= 0 && v <= 70)) return 'invalid camera steps';
+    if (typeof s.externalBob !== 'boolean') return 'invalid external bob flag';
+    return null;
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    const error = this.validateRuntimeSnapshot(value);
+    if (error) throw new Error(`Invalid cascade mount runtime snapshot: ${error}`);
+    const s = value as CascadeMountRuntimeSnapshot;
+    this.angleX = s.angleX;
+    this.angleY = s.angleY;
+    this.orbit = s.orbit;
+    this.fixZ = s.fixZ;
+    this.cameraSteps = [...s.cameraSteps];
+    this.bobX = s.bobX;
+    this.bobFix = s.bobFix;
+    this.externalBob = s.externalBob;
   }
 
   pose(): MountPose {

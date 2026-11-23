@@ -54,6 +54,13 @@ const DELTA_STEP = 0x200;
 /** ApplyRotationToTargetFx32: an angle in fx32 degrees, kept in [0, 360). */
 const wrap = (a: number) => (((a % (360 * FX)) + 360 * FX) % (360 * FX));
 
+export interface SkyRuntimeSnapshot {
+  kind: SkyKind;
+  fixedDarkness: number | null;
+  darkness: number;
+  clouds: { angle: number; delta: number }[];
+}
+
 export class Sky {
   kind: SkyKind;
   /** Set by Giratina's arrival (SetSkyBackgroundDarknessCalculationDisabled / Level); else from the player's height. */
@@ -76,6 +83,41 @@ export class Sky {
       else if (want > c.delta) c.delta = Math.min(want, c.delta + DELTA_STEP);
       c.angle = wrap(c.angle + c.t.speed + c.delta);
     }
+  }
+
+  captureRuntimeSnapshot(): SkyRuntimeSnapshot {
+    return {
+      kind: this.kind,
+      fixedDarkness: this.fixedDarkness,
+      darkness: this.darkness,
+      clouds: this.clouds.map(({ angle, delta }) => ({ angle, delta })),
+    };
+  }
+
+  validateRuntimeSnapshot(value: unknown): string | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return 'snapshot must be an object';
+    const s = value as Partial<SkyRuntimeSnapshot>;
+    if (s.kind !== 'normal' && s.kind !== 'giratina-room' && s.kind !== 'giratina-room-dark') return 'invalid sky kind';
+    if (s.kind !== this.kind) return `sky kind mismatch: expected ${this.kind}`;
+    if (s.fixedDarkness === undefined || (s.fixedDarkness !== null && (!Number.isSafeInteger(s.fixedDarkness) || s.fixedDarkness < 0 || s.fixedDarkness > MAX_DARKNESS))) return 'invalid fixed darkness';
+    if (!Number.isSafeInteger(s.darkness) || s.darkness! < 0 || s.darkness! > MAX_DARKNESS) return 'invalid darkness';
+    if (!Array.isArray(s.clouds) || s.clouds.length !== this.clouds.length) return 'cloud count mismatch';
+    for (const c of s.clouds) {
+      if (!c || !Number.isSafeInteger(c.angle) || !Number.isSafeInteger(c.delta)) return 'invalid cloud accumulator';
+    }
+    return null;
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    const error = this.validateRuntimeSnapshot(value);
+    if (error) throw new Error(`Invalid sky runtime snapshot: ${error}`);
+    const s = value as SkyRuntimeSnapshot;
+    this.fixedDarkness = s.fixedDarkness;
+    this.darkness = s.darkness;
+    s.clouds.forEach((c, i) => {
+      this.clouds[i]!.angle = c.angle;
+      this.clouds[i]!.delta = c.delta;
+    });
   }
 
   view(): DistortionView['sky'] {

@@ -58,8 +58,158 @@ function boulder(b: Actor) {
   return r;
 }
 
+
+export type BoulderFallState =
+  | { kind: 'toB6F' }
+  | {
+      kind: 'correctPit';
+      boulderId: 128 | 129 | 130;
+      pushed: Facing;
+      pit: number;
+      phase: 'tip' | 'shake' | 'script';
+      tipStep: number;
+      shakeStep: number;
+      shakeBase: number;
+    }
+  | {
+      kind: 'wrongPit';
+      boulderId: 128 | 129 | 130;
+      pushed: Facing;
+      phase: 'tip' | 'drop';
+      tipStep: number;
+      dropStep: number;
+    };
+
+/** Starts a serializable continuation without advancing its first frame. */
+export function beginBoulderFall(
+  w: DistortionWorld,
+  b: Actor,
+  pushed: Facing,
+): BoulderFallState | null {
+  const at = fall(w.room.id, b.x, b.z);
+  if (!at) return null;
+
+  if (at.pit === null) return { kind: 'toB6F' };
+
+  const boulderId = b.localId as 128 | 129 | 130;
+  boulder(b);
+  const correct = at.pit >= 0 && !(w.slot.puzzleFlags & (1 << at.pit));
+
+  if (correct) {
+    return {
+      kind: 'correctPit',
+      boulderId,
+      pushed,
+      pit: at.pit,
+      phase: 'tip',
+      tipStep: 0,
+      shakeStep: 0,
+      shakeBase: 0,
+    };
+  }
+
+  return {
+    kind: 'wrongPit',
+    boulderId,
+    pushed,
+    phase: 'tip',
+    tipStep: 0,
+    dropStep: 0,
+  };
+}
+
+/** Advances exactly one generator.next() worth of work. */
+export function stepBoulderFall(
+  w: DistortionWorld,
+  b: Actor,
+  state: BoulderFallState,
+): BoulderFallState | null {
+  if (state.kind === 'toB6F') {
+    b.y -= 8;
+    if (b.y > B6F_HEIGHT) return state;
+
+    w.h.sound.playNamed('SEQ_SE_DP_UG_008');
+    b.y = B6F_HEIGHT;
+    b.zone = w.zoneOf('B6F');
+    w.h.rekeyObjects();
+
+    const r = boulder(b);
+    w.slot.puzzleFlags = (w.slot.puzzleFlags | (1 << r.outside)) & ~(1 << r.b5f);
+    return null;
+  }
+
+  const r = BOULDERS[state.boulderId];
+  if (!r) throw new Error(`world: invalid saved Distortion World boulder id ${state.boulderId}`);
+  const [dx, dz] = DELTA[state.pushed];
+
+  if (state.phase === 'tip') {
+    if (state.tipStep < 8) {
+      const i = state.tipStep + 1;
+      b.y -= 2;
+      b.offset[0] = dx * 2 * i;
+      b.offset[2] = dz * 2 * i;
+      state.tipStep++;
+      return state;
+    }
+
+    if (state.tipStep < 11) {
+      b.y -= 4;
+      state.tipStep++;
+      return state;
+    }
+
+    b.y -= 4;
+    state.tipStep++;
+
+    if (state.kind === 'correctPit') {
+      w.slot.puzzleFlags = (w.slot.puzzleFlags | (1 << state.pit)) & ~(1 << r.outside);
+      b.localId = r.pitObject;
+      b.x += dx;
+      b.z += dz;
+      b.offset[0] = b.offset[2] = 0;
+      w.h.rekeyObjects();
+      w.h.sound.playNamed('SEQ_SE_DP_UG_008');
+      state.phase = 'shake';
+      state.shakeBase = b.offset[1];
+      return state;
+    }
+
+    state.phase = 'drop';
+    return state;
+  }
+
+  if (state.kind === 'wrongPit') {
+    b.y -= 8;
+    state.dropStep++;
+    if (state.dropStep < 40) return state;
+
+    w.slot.puzzleFlags = (w.slot.puzzleFlags | (1 << r.b5f)) & ~(1 << r.outside);
+    w.h.deleteObject(b);
+    return null;
+  }
+
+  if (state.phase === 'shake') {
+    const step = state.shakeStep + 1;
+    const shake = step <= 7 ? (step % 2 === 1 ? 1 : -1) : 0;
+    b.offset[1] = state.shakeBase + shake;
+    state.shakeStep = step;
+    if (step < 32) return state;
+
+    w.slot.puzzleFlags &= ~(1 << r.guardianInB6F);
+    w.h.startScript(w.label(r.script));
+    state.phase = 'script';
+    return state;
+  }
+
+  if (w.h.scriptRunning()) return state;
+  if (PITS.every((p) => w.slot.puzzleFlags & (1 << p))) {
+    w.setFlag('FLAG_DISTORTION_WORLD_PUZZLE_FINISHED');
+  }
+  return null;
+}
+
 /** DistWorldFallingBoulder_New: the fall of a boulder standing on a fall location, or null. */
-export function boulderFall(w: DistortionWorld, b: Actor, pushed: Facing): Task | null {
+export function boulderFallLegacy(w: DistortionWorld, b: Actor, pushed: Facing): Task | null {
   const at = fall(w.room.id, b.x, b.z);
   if (!at) return null;
   if (at.pit === null) return toB6F(w, b);

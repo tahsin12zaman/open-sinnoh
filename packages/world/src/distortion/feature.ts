@@ -1,3 +1,4 @@
+import type { BoulderFallState } from './boulders.ts';
 import { CascadeMount, presentSurf, type MountPose } from './surf.ts';
 import type { DistortionRoom, DistortionView, DistortionWorldFeature, DistortionWorldTables, DwCommand, DwCondition, DwJump, DwObject, DwPropKind, DwTile, EffectView, Facing, FeaturesView, FieldView, GameState } from '@opensinnoh/contracts';
 import { newGameRecord } from '@opensinnoh/contracts';
@@ -12,7 +13,7 @@ import { uprightStep, type Upright } from './actions.ts';
 import { Sky, type SkyKind } from './sky.ts';
 import { Ghosts } from './ghosts.ts';
 import { runCommands, WATERFALLS, type Task } from './events.ts';
-import { boulderFall, boulderWillFall } from './boulders.ts';
+import { beginBoulderFall, boulderWillFall, stepBoulderFall } from './boulders.ts';
 
 /**
  * The Distortion World's runtime (decomp overlay 9, DistWorld_DynamicMapFeaturesInit and the hooks the field
@@ -107,7 +108,8 @@ export interface AvatarDistortion {
   /** DistWorld_WillBoulderBeAtFallLocation: pushed `dir`, the boulder would stop on a fall location. */
   boulderWillFall(boulder: Actor, dir: Facing): boolean;
   /** DistWorld_IsBoulderAtFallLocation → DistWorldFallingBoulder_New: the boulder's fall, run a frame a step, or null. */
-  boulderFall(boulder: Actor, pushed: Facing): Generator<void, void, void> | null;
+  beginBoulderFall(boulder: Actor, pushed: Facing): BoulderFallState | null;
+  stepBoulderFall(boulder: Actor, state: BoulderFallState): BoulderFallState | null;
   /** DistWorld_IsBlockedByCynthia: a double jump `dir` onto tile x/z is not taken. */
   blockedByCynthia(x: number, z: number, dir: Facing): boolean;
 }
@@ -336,8 +338,12 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
     return boulderWillFall(this.room.id, boulder, dir);
   }
 
-  boulderFall(boulder: Actor, pushed: Facing): Task | null {
-    return boulderFall(this, boulder, pushed);
+  beginBoulderFall(boulder: Actor, pushed: Facing): BoulderFallState | null {
+    return beginBoulderFall(this, boulder, pushed);
+  }
+
+  stepBoulderFall(boulder: Actor, state: BoulderFallState): BoulderFallState | null {
+    return stepBoulderFall(this, boulder, state);
   }
 
   /** A script label of the rooms' script files by its decomp name. */
@@ -620,6 +626,147 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
   }
 
   // ---------- MapFeature ----------
+
+  /** Capture the idle feature runtime without rebuilding the room or its actors. */
+  captureRuntimeSnapshot(): unknown {
+    if (this.event !== null || this.ride !== null) {
+      throw new Error('Distortion World snapshot unavailable during an event or elevator ride.');
+    }
+    const pose = (p: MountPose | null) => p ? {
+      rotation: [...p.rotation], orbit: p.orbit, fix: [...p.fix],
+      bobX: p.bobX, bobFix: p.bobFix, externalBob: p.externalBob,
+    } : null;
+    return {
+      zone: this.h.zone().id,
+      slot: {
+        ...this.slot,
+        cameraAngle: [...this.slot.cameraAngle],
+        platforms: this.slot.platforms.map(p => ({ ...p })),
+      },
+      current: this.current,
+      ghosts: this.ghosts.map(g => g.captureRuntimeSnapshot()),
+      sky: this.sky.captureRuntimeSnapshot(),
+      shadow: this.shadow ? {
+        ...this.shadow, pos: [...this.shadow.pos], step: [...this.shadow.step],
+        angles: [...this.shadow.angles],
+      } : null,
+      platformOffsets: [...this.platformOffsets].map(([k, v]) => [k, [...v]]),
+      roll: { ...this.roll },
+      cascadeMount: this.cascadeMount?.captureRuntimeSnapshot() ?? null,
+      mountPrev: pose(this.mountPrev),
+      giratinaTick: this.giratinaTick,
+      propsPrev: [...this.propsPrev].map(([k, v]) => [k, [...v]]),
+      camera: {
+        cur: [...this.camera.cur], prev: [...this.camera.prev],
+        target: [...this.camera.target], active: this.camera.active,
+        steps: this.camera.steps, acc: [...this.camera.acc], step: [...this.camera.step],
+      },
+      steppingStones: { ...this.steppingStones },
+      eventActive: false,
+      rideActive: false,
+    };
+  }
+
+  /** Preflight every feature-owned value before World changes any live runtime state. */
+  validateRuntimeSnapshot(value: unknown): string | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return 'snapshot must be an object';
+    const s = value as any;
+    const finite3 = (v: any) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+    if (s.zone !== this.h.zone().id) return 'room identity mismatch';
+    if (this.event || this.ride || s.eventActive !== false || s.rideActive !== false)
+      return 'active event/elevator continuation is not serializable';
+    const slot = s.slot;
+    if (!slot || slot.kind !== 'distortion-world' || slot.valid !== true ||
+        !Number.isSafeInteger(slot.hiddenGhostGroups) || slot.hiddenGhostGroups < 0 || slot.hiddenGhostGroups > GHOST_GROUPS ||
+        !(slot.support === null || (Number.isSafeInteger(slot.support) && slot.support >= 0 && slot.support < this.room.supports.length)) ||
+        !finite3(slot.cameraAngle) || !slot.cameraAngle.every(Number.isSafeInteger) ||
+        !Number.isSafeInteger(slot.platformFlags) || slot.platformFlags < 0 ||
+        !Number.isSafeInteger(slot.puzzleFlags) || slot.puzzleFlags < 0 ||
+        !['up', 'down', 'left', 'right'].includes(slot.movingDir) || !Array.isArray(slot.platforms))
+      return 'invalid Distortion World slot';
+    for (const p of slot.platforms) {
+      if (!p || typeof p.zone !== 'string' || !Number.isSafeInteger(p.index) || p.index < 0 ||
+          ![p.x, p.y, p.z, p.path].every(Number.isSafeInteger) || p.path < 0)
+        return 'invalid platform slot';
+      const room = this.h.reg.distortionRooms.get(p.zone);
+      if (!room?.movingPlatforms[p.index] || room.movingPlatforms[p.index]!.index !== p.index)
+        return 'unknown platform identity';
+    }
+    if (!['land', 'floor', 'west-wall', 'east-wall', 'ceiling'].includes(s.current))
+      return 'invalid current surface';
+    if (!Array.isArray(s.ghosts) || s.ghosts.length !== this.ghosts.length)
+      return 'ghost manager count mismatch';
+    for (let i = 0; i < this.ghosts.length; i++) {
+      const e = this.ghosts[i]!.validateRuntimeSnapshot(s.ghosts[i]);
+      if (e) return `ghost ${i}: ${e}`;
+    }
+    const skyError = this.sky.validateRuntimeSnapshot(s.sky);
+    if (skyError) return `sky: ${skyError}`;
+    if (s.shadow !== null && (!s.shadow || !finite3(s.shadow.pos) || !finite3(s.shadow.step) ||
+        !finite3(s.shadow.angles) || !Number.isSafeInteger(s.shadow.left) || s.shadow.left < 0 ||
+        !Number.isSafeInteger(s.shadow.sound) || !Number.isFinite(s.shadow.scale) ||
+        typeof s.shadow.done !== 'boolean')) return 'invalid shadow state';
+    if (!Array.isArray(s.platformOffsets) || s.platformOffsets.some((e: any) =>
+        !Array.isArray(e) || e.length !== 2 || typeof e[0] !== 'string' || !finite3(e[1])))
+      return 'invalid platform offsets';
+    if (!s.roll || !['cur', 'prev', 'final', 'delta', 'steps'].every(k => Number.isFinite(s.roll[k])) ||
+        !Number.isSafeInteger(s.roll.steps) || s.roll.steps < 0) return 'invalid roll state';
+    if ((s.cascadeMount === null) !== (this.cascadeMount === null))
+      return 'cascade mount identity mismatch';
+    if (s.cascadeMount !== null) {
+      const e = this.cascadeMount!.validateRuntimeSnapshot(s.cascadeMount);
+      if (e) return `cascade mount: ${e}`;
+    }
+    const validPose = (p: any) => p === null || (!!p && finite3(p.rotation) &&
+      Number.isFinite(p.orbit) && finite3(p.fix) && Number.isFinite(p.bobX) &&
+      Number.isFinite(p.bobFix) && typeof p.externalBob === 'boolean');
+    if (!validPose(s.mountPrev)) return 'invalid previous mount pose';
+    if (!Number.isSafeInteger(s.giratinaTick) || s.giratinaTick < 0) return 'invalid Giratina tick';
+    if (!Array.isArray(s.propsPrev) || s.propsPrev.some((e: any) =>
+        !Array.isArray(e) || e.length !== 2 || typeof e[0] !== 'string' || !finite3(e[1])))
+      return 'invalid previous prop positions';
+    const c = s.camera;
+    if (!c || !['cur', 'prev', 'target', 'acc', 'step'].every(k => finite3(c[k])) ||
+        typeof c.active !== 'boolean' || !Number.isSafeInteger(c.steps) || c.steps < 0)
+      return 'invalid camera transition';
+    if (!s.steppingStones || !Number.isSafeInteger(s.steppingStones.step) ||
+        s.steppingStones.step < 0 || s.steppingStones.step > 2 * GHOST_OPACITY_MAX ||
+        typeof s.steppingStones.shown !== 'boolean') return 'invalid stepping-stone state';
+    return null;
+  }
+
+  /** Restore mutable feature state in place; never rerun map initialization. */
+  restoreRuntimeSnapshot(value: unknown): void {
+    const error = this.validateRuntimeSnapshot(value);
+    if (error) throw new Error(`Invalid Distortion World snapshot: ${error}`);
+    const s = value as any;
+    Object.assign(this.slot, {
+      ...s.slot,
+      cameraAngle: [...s.slot.cameraAngle],
+      platforms: s.slot.platforms.map((p: any) => ({ ...p })),
+    });
+    this.current = s.current;
+    s.ghosts.forEach((g: unknown, i: number) => this.ghosts[i]!.restoreRuntimeSnapshot(g));
+    this.sky.restoreRuntimeSnapshot(s.sky);
+    this.shadow = s.shadow ? {
+      ...s.shadow, pos: [...s.shadow.pos], step: [...s.shadow.step], angles: [...s.shadow.angles],
+    } : null;
+    this.platformOffsets.clear();
+    for (const [k, v] of s.platformOffsets) this.platformOffsets.set(k, [...v]);
+    this.roll = { ...s.roll };
+    if (this.cascadeMount && s.cascadeMount) this.cascadeMount.restoreRuntimeSnapshot(s.cascadeMount);
+    this.mountPrev = s.mountPrev ? {
+      ...s.mountPrev, rotation: [...s.mountPrev.rotation], fix: [...s.mountPrev.fix],
+    } : null;
+    this.giratinaTick = s.giratinaTick;
+    this.propsPrev.clear();
+    for (const [k, v] of s.propsPrev) this.propsPrev.set(k, [...v] as [number, number, number]);
+    this.camera = {
+      cur: [...s.camera.cur], prev: [...s.camera.prev], target: [...s.camera.target],
+      active: s.camera.active, steps: s.camera.steps, acc: [...s.camera.acc], step: [...s.camera.step],
+    };
+    this.steppingStones = { ...s.steppingStones };
+  }
 
   step(): void {
     this.mountPrev = this.cascadeMount?.pose() ?? null;
