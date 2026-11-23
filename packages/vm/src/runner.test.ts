@@ -20,6 +20,7 @@ describe('VM on the fixture scripts', () => {
 
     // Starter choice on the panel: move the cursor with the d-pad and confirm with A.
     d.until(() => d.vm.view().panel.kind === 'choice');
+    expect((d.vm as Runner).thread?.contexts[0]?.waitState).toEqual({ kind: 'starter-choice' });
     const panel = d.vm.view().panel;
     expect(panel.kind === 'choice' && panel.options.map((o) => o.label)).toEqual(['Mosslet', 'Emberkit', 'Dripling']);
     d.press('down');
