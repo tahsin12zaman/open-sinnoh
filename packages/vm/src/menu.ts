@@ -32,6 +32,23 @@ export interface MenuEntry {
 }
 
 export type MenuKind = 'single' | 'multi' | 'list';
+export interface ScriptMenuRuntimeSnapshot {
+  entries: MenuEntry[];
+  anchor: { x: number; y: number };
+  initialCursor: number;
+  canCancel: boolean;
+  bank: number;
+  anchorRight: boolean;
+  anchorBottom: boolean;
+  kind: MenuKind;
+  columns: number;
+  cursor: number;
+  top: number;
+  delay: number;
+  geometry: { x: number; y: number; width: number; rows: number } | null;
+  remembered: boolean;
+}
+
 
 export class ScriptMenu {
   readonly entries: MenuEntry[] = [];
@@ -98,6 +115,49 @@ export class ScriptMenu {
     this.geometry = { x: x * TILE, y: y * TILE, width: widthTiles * TILE, rows };
     if (this.cursor >= this.entries.length) throw new Error(`menu: initial cursor ${this.cursor} past ${this.entries.length} entries`);
     this.scrollToCursor();
+  }
+
+  /** Captures menu layout, cursor and input-delay accumulators for a runtime save state. */
+  captureRuntimeSnapshot(): ScriptMenuRuntimeSnapshot {
+    return structuredClone({
+      entries: this.entries,
+      anchor: this.anchor,
+      initialCursor: this.cursor,
+      canCancel: this.canCancel,
+      bank: this.bank,
+      anchorRight: this.anchorRight,
+      anchorBottom: this.anchorBottom,
+      kind: this.kind,
+      columns: this.columns,
+      cursor: this.cursor,
+      top: this.top,
+      delay: this.delay,
+      geometry: this.geometry,
+      remembered: this.remembered,
+    });
+  }
+
+  static fromRuntimeSnapshot(snapshot: ScriptMenuRuntimeSnapshot): ScriptMenu {
+    if (!snapshot || !Array.isArray(snapshot.entries) || !snapshot.anchor
+      || !['single', 'multi', 'list'].includes(snapshot.kind)
+      || !Number.isSafeInteger(snapshot.cursor) || snapshot.cursor < 0 || snapshot.cursor >= snapshot.entries.length
+      || !Number.isSafeInteger(snapshot.top) || snapshot.top < 0
+      || !Number.isSafeInteger(snapshot.delay) || snapshot.delay < 0
+      || !Number.isSafeInteger(snapshot.columns) || snapshot.columns < 1) {
+      throw new Error('malformed scripted-menu runtime snapshot');
+    }
+    const menu = new ScriptMenu(snapshot.anchor, snapshot.initialCursor, snapshot.canCancel, snapshot.bank);
+    menu.entries.push(...structuredClone(snapshot.entries));
+    menu.anchorRight = snapshot.anchorRight;
+    menu.anchorBottom = snapshot.anchorBottom;
+    menu.kind = snapshot.kind;
+    menu.columns = snapshot.columns;
+    menu.cursor = snapshot.cursor;
+    menu.top = snapshot.top;
+    menu.delay = snapshot.delay;
+    menu.geometry = snapshot.geometry ? { ...snapshot.geometry } : null;
+    menu.remembered = snapshot.remembered;
+    return menu;
   }
 
   get shown(): boolean {
