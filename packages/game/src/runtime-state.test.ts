@@ -53,7 +53,7 @@ describe('runtime-state storage', () => {
 
   it('does not overwrite ordinary save storage', async () => {
     const runtime = new IndexedDbRuntimeStateStore('opensinnoh-runtime-state-isolation');
-    const saves = new (await import('./storage.ts')).IndexedDbSaveStore('opensinnoh-runtime-state-isolation');
+    const saves = new (await import('./storage.ts')).IndexedDbSaveStore('opensinnoh-ordinary-save-isolation');
     await runtime.put(createRuntimeStateEnvelope('slot-1', 'engine-test', { tick: 3 }));
     expect(await saves.get('slot-1')).toBeUndefined();
     expect(await runtime.get('slot-1')).toMatchObject({ payload: { tick: 3 } });
