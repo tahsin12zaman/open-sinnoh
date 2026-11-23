@@ -10,3 +10,4 @@ export * from './replay-runner.ts';
 export * from './until.ts';
 export * from './field-moves.ts';
 export * from './sound.ts';
+export * from './runtime-state.ts';
