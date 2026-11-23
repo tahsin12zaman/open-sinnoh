@@ -6,7 +6,7 @@ describe('scripted-menu runtime snapshots', () => {
     const menu = new ScriptMenu({ x: 12, y: 8 }, 0, true, 204);
     for (let i = 0; i < 12; i++) menu.add({ text: `Entry ${i}`, index: i });
     menu.show('list', (text) => text.length * 8);
-    const input = { held: [], pressed: ['down'], touch: null } as const;
+    const input = { held: [] as never[], pressed: ['down'] as never[], touch: null };
     menu.step(input, null);
     menu.step(input, null);
     menu.step(input, null);
