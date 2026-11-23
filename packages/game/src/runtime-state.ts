@@ -27,17 +27,32 @@ export interface RuntimeStateSlot {
   engine: string;
 }
 
-/** JSON round-tripping is the portability boundary: functions, symbols, cycles and BigInts are rejected. */
-function assertJsonValue(value: unknown): void {
-  let encoded: string | undefined;
-  try {
-    encoded = JSON.stringify(value);
-  } catch (error) {
-    throw new Error('runtime state payload is not JSON-serializable', { cause: error });
+/** Reject values JSON would silently omit or coerce; a save must resume without data loss. */
+function assertJsonValue(value: unknown, path = 'payload', seen = new Set<object>()): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`runtime state ${path} contains a non-finite number`);
+    return;
   }
-  if (encoded === undefined) throw new Error('runtime state payload is not JSON-serializable');
-  const decoded: unknown = JSON.parse(encoded);
-  if (decoded === undefined) throw new Error('runtime state payload is not JSON-serializable');
+  if (typeof value !== 'object') throw new Error(`runtime state ${path} is not JSON-serializable`);
+  if (seen.has(value)) throw new Error(`runtime state ${path} contains a cycle`);
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || value instanceof Date || value instanceof Map || value instanceof Set) {
+    throw new Error(`runtime state ${path} contains a non-JSON object`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`runtime state ${path} contains a non-plain object`);
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertJsonValue(item, `${path}[${index}]`, seen));
+  } else {
+    for (const [key, item] of Object.entries(value)) assertJsonValue(item, `${path}.${key}`, seen);
+    for (const key of Object.getOwnPropertySymbols(value)) {
+      if (Object.prototype.propertyIsEnumerable.call(value, key)) throw new Error(`runtime state ${path} contains a symbol key`);
+    }
+  }
+  seen.delete(value);
 }
 
 /** Builds a validated envelope without mutating the caller's snapshot. */
