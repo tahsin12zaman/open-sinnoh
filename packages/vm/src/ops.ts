@@ -76,7 +76,7 @@ export function m1aHandlers(r: Runner): Record<string, Handler> {
 
   const showText = (t: Thread, c: Context, text: Id): Result => {
     const p = r.showMessage(t, text, r.textSpeed());
-    return r.pause(c, () => p.done);
+    return r.pause(c, () => p.done, { kind: 'message' });
   };
   const localBank = (a: Arg | undefined, op: string) => {
     if (a?.kind !== 'int') throw new Error(`${op}: no text bank operand (a map script with no known bank)`);
@@ -148,7 +148,7 @@ export function m1aHandlers(r: Runner): Record<string, Handler> {
       // Decomp Trainer_LoadMessage: a missing message prints an empty string.
       const p = new TextPrinter([], { speed: r.textSpeed() });
       r.ui.message = { printer: p };
-      return r.pause(c, () => p.done);
+      return r.pause(c, () => p.done, { kind: 'message' });
     },
     // ScrCmd_PlayTrainerEncounterBGM: the field BGM pauses for the class's eyes-meet music (Sound_SwapBGM).
     play_trainer_encounter_bgm: (t, _c, a) => {
