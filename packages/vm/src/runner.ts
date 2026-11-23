@@ -80,6 +80,17 @@ const DIR_BUTTONS: Button[] = ['up', 'down', 'left', 'right'];
 const CHOOSE_STARTER_PROMPT = 7;
 
 export type Wait = (input: InputFrame) => boolean;
+export type RuntimeWait =
+  | { kind: 'time'; variable: Id }
+  | { kind: 'common-script' }
+  | { kind: 'message' }
+  | { kind: 'button' }
+  | { kind: 'signpost-done' }
+  | { kind: 'movement' }
+  | { kind: 'follower' }
+  | { kind: 'fade' }
+  | { kind: 'warp' }
+  | { kind: 'door' };
 
 export interface Context {
   label: Id;
@@ -88,6 +99,8 @@ export interface Context {
   stack: { label: Id; cmds: Command[]; pc: number }[];
   state: 'running' | 'waiting' | 'stopped';
   wait: Wait | null;
+  /** Data-only equivalent for waits whose continuation can be reconstructed after reload. */
+  waitState: RuntimeWait | null;
   cmp: number;
 }
 
@@ -514,7 +527,7 @@ export class Runner implements ScriptRunner {
   }
 
   newContext(label: Id): Context {
-    return { label, cmds: this.commands(label), pc: 0, stack: [], state: 'running', wait: null, cmp: 0 };
+    return { label, cmds: this.commands(label), pc: 0, stack: [], state: 'running', wait: null, waitState: null, cmp: 0 };
   }
 
   commands(label: Id): Command[] {
@@ -536,9 +549,10 @@ export class Runner implements ScriptRunner {
   runContext(t: Thread, c: Context, input: InputFrame): boolean {
     if (c.state === 'stopped') return false;
     if (c.state === 'waiting') {
-      if (c.wait!(input)) {
+      if (c.waitState ? this.resumeRuntimeWait(t, c, input) : c.wait!(input)) {
         c.state = 'running';
         c.wait = null;
+        c.waitState = null;
       }
       return true;
     }
@@ -583,10 +597,40 @@ export class Runner implements ScriptRunner {
     return 'continue';
   }
 
-  pause(c: Context, wait: Wait): Result {
+  pause(c: Context, wait: Wait, waitState: RuntimeWait | null = null): Result {
     c.state = 'waiting';
     c.wait = wait;
+    c.waitState = waitState;
     return 'yield';
+  }
+
+  /** Evaluate a data-only wait without retaining the original command's JavaScript closure. */
+  private resumeRuntimeWait(t: Thread, c: Context, input: InputFrame): boolean {
+    const wait = c.waitState;
+    if (!wait) throw new Error('missing runtime wait descriptor');
+    switch (wait.kind) {
+      case 'time': {
+        const left = (this.getVar(t, wait.variable) - 1) & 0xffff;
+        this.setVar(t, wait.variable, left);
+        return left === 0;
+      }
+      case 'common-script': return !t.subActive;
+      case 'message': return this.ui.message?.printer.done ?? true;
+      case 'button': {
+        let done = has(input.pressed, 'a') || has(input.pressed, 'b');
+        const dir = done ? -1 : DIR_BUTTONS.findIndex((b) => has(input.pressed, b));
+        if (dir >= 0) { this.field.turnPlayer(DIRS[dir]!); done = true; }
+        if (!done && has(input.pressed, 'x')) { t.startMenu = true; done = true; }
+        if (done) this.ui.buttonWait = false;
+        return done;
+      }
+      case 'signpost-done': return !this.ui.signpost || this.ui.signpost.command === SIGNPOST_CMD.none;
+      case 'movement': return this.field.movementDone('all');
+      case 'follower': return !this.field.objectMoving(LOCALID_FOLLOWER);
+      case 'fade': return this.field.fadeDone();
+      case 'warp': return this.field.warpDone();
+      case 'door': return this.field.doorDone();
+    }
   }
 
   jump(c: Context, label: Id): void {
@@ -780,7 +824,7 @@ export class Runner implements ScriptRunner {
           const left = (this.getVar(t, v) - 1) & 0xffff;
           this.setVar(t, v, left);
           return left === 0;
-        });
+        }, { kind: 'time', variable: v });
       },
       compare_var_to_value: (t, c, a) => ((c.cmp = compare(this.getVar(t, this.ref(a[0], 'var')), this.int(a[1]))), 'continue'),
       compare_var_to_var: (t, c, a) => ((c.cmp = compare(this.getVar(t, this.ref(a[0], 'var')), this.getVar(t, this.ref(a[1], 'var')))), 'continue'),
@@ -788,7 +832,7 @@ export class Runner implements ScriptRunner {
         if (t.contexts[1]) throw new Error('a common script is already running');
         t.contexts[1] = this.newContext(this.ref(a[0], 'label'));
         t.subActive = true;
-        return this.pause(c, () => !t.subActive);
+        return this.pause(c, () => !t.subActive, { kind: 'common-script' });
       },
       return_common_script: (t) => ((t.subActive = false), 'continue'),
       go_to: (_t, c, a) => (this.jump(c, this.ref(a[0], 'label')), 'continue'),
@@ -820,7 +864,7 @@ export class Runner implements ScriptRunner {
       // messages
       message: (t, c, a) => {
         const p = this.showMessage(t, this.ref(a[0], 'text'), this.textSpeed());
-        return this.pause(c, () => p.done);
+        return this.pause(c, () => p.done, { kind: 'message' });
       },
       // Decomp ScrCmd_MessageInstant → ScriptMessage_ShowInstant: the whole message at once; the script goes on.
       message_instant: (t, _c, a) => (this.showMessage(t, this.ref(a[0], 'text'), TEXT_SPEED.instant), 'continue'),
@@ -856,7 +900,7 @@ export class Runner implements ScriptRunner {
         if (sp.command === SIGNPOST_CMD.draw) sp.offset = SIGNPOST_HIDDEN;
         return 'yield';
       },
-      wait_for_signpost_done: (_t, c) => (!this.ui.signpost || this.ui.signpost.command === SIGNPOST_CMD.none ? 'continue' : this.pause(c, () => !this.ui.signpost || this.ui.signpost.command === SIGNPOST_CMD.none)),
+      wait_for_signpost_done: (_t, c) => (!this.ui.signpost || this.ui.signpost.command === SIGNPOST_CMD.none ? 'continue' : this.pause(c, () => !this.ui.signpost || this.ui.signpost.command === SIGNPOST_CMD.none, { kind: 'signpost-done' })),
       draw_signpost_instant_message: (t, _c, a) => {
         this.openSignpost(this.int(a[1]));
         this.showMessage(t, this.ref(a[0], 'text'), TEXT_SPEED.instant);
@@ -897,11 +941,11 @@ export class Runner implements ScriptRunner {
 
       // objects and camera
       apply_movement: (t, _c, a) => (this.field.applyMovement(this.val(t, a[0]), this.ref(a[1], 'movement')), 'continue'),
-      wait_movement: (_t, c) => this.pause(c, () => this.field.movementDone('all')),
+      wait_movement: (_t, c) => this.pause(c, () => this.field.movementDone('all'), { kind: 'movement' }),
       lock_all: (_t, c) => {
         this.field.lockAll();
         // Decomp ScrCmd_LockAll: a partner follower that is mid-step finishes its step first.
-        if (this.state.hasPartner && this.field.objectMoving(LOCALID_FOLLOWER)) return this.pause(c, () => !this.field.objectMoving(LOCALID_FOLLOWER));
+        if (this.state.hasPartner && this.field.objectMoving(LOCALID_FOLLOWER)) return this.pause(c, () => !this.field.objectMoving(LOCALID_FOLLOWER), { kind: 'follower' });
         return 'yield';
       },
       release_all: () => (this.field.releaseAll(), 'yield'),
@@ -934,11 +978,11 @@ export class Runner implements ScriptRunner {
         this.field.fade(type % 2 === 0 ? 'out' : 'in', steps * framesPerStep, color === 0 ? 'black' : 'white');
         return 'continue';
       },
-      wait_fade_screen: (_t, c) => this.pause(c, () => this.field.fadeDone()),
+      wait_fade_screen: (_t, c) => this.pause(c, () => this.field.fadeDone(), { kind: 'fade' }),
       warp: (t, c, a) => {
         const zone = this.source('zones', this.val(t, a[0]))!;
         this.field.warp(zone, this.val(t, a[2]), this.val(t, a[3]), facingOf(this.val(t, a[4])));
-        return this.pause(c, () => this.field.warpDone());
+        return this.pause(c, () => this.field.warpDone(), { kind: 'warp' });
       },
       load_door_animation: (t, _c, a) => {
         t.doors.set(this.int(a[4]), { x: this.int(a[0]) * 32 + this.val(t, a[2]), z: this.int(a[1]) * 32 + this.val(t, a[3]) });
@@ -946,7 +990,7 @@ export class Runner implements ScriptRunner {
       },
       play_door_open_animation: (t, _c, a) => this.door(t, this.int(a[0]), 'open'),
       play_door_close_animation: (t, _c, a) => this.door(t, this.int(a[0]), 'close'),
-      wait_for_animation: (_t, c) => this.pause(c, () => this.field.doorDone()),
+      wait_for_animation: (_t, c) => this.pause(c, () => this.field.doorDone(), { kind: 'door' }),
       unload_animation: (t, _c, a) => (t.doors.delete(this.int(a[0])), 'continue'),
       // Decomp ScrCmd_LoadPCAnimation / PlayPCBootUpAnimation / PlayPCShutDownAnimation (pc_animation.c): the loaded
       // PC's one-shot clips 0 and 1 under the tag; wait_for_animation waits on them.
