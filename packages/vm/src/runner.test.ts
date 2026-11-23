@@ -119,6 +119,19 @@ describe('VM on the fixture scripts', () => {
 });
 
 describe('VM semantics', () => {
+  it('wait_ab_press uses a serializable descriptor', () => {
+    const d = run(`
+test:WaitAB::
+  wait_ab_press
+  end
+`);
+    d.vm.start({ label: 'test:WaitAB', zone: 'fixture:TOWN', source: 'test' });
+    d.tick();
+    expect((d.vm as Runner).thread?.contexts[0]?.waitState).toEqual({ kind: 'ab' });
+    d.press('a');
+    expect((d.vm as Runner).thread?.contexts[0]).toBeNull();
+  });
+
   it('wait_button: a d-pad press turns the player and ends the wait', () => {
     const d = driver();
     d.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });
