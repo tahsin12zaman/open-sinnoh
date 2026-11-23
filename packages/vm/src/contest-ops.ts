@@ -246,7 +246,7 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
     /** Offline, MessageSynchronized is ScriptMessage_Show as Message. */
     message_synchronized: (t, c, a) => {
       const p = r.showMessage(t, r.ref(a[0], 'text'), r.textSpeed());
-      return r.pause(c, () => p.done);
+      return r.pause(c, () => p.done, { kind: 'message' });
     },
     /** HBlankSystem_Stop/Start: the field has no HBlank tasks to pause (no per-scanline effects are drawn). */
     stop_h_blank: () => 'continue',
