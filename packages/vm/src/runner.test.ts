@@ -106,6 +106,7 @@ describe('VM on the fixture scripts', () => {
     d.tick({ held: ['a'] });
     expect(d.vm.view().message!.text.length).toBe(before + 2);
     d.until(() => d.vm.view().message?.waitingForInput === true);
+    expect(d.vm.thread?.contexts[0]?.waitState).toEqual({ kind: 'button' });
     // wait_button is waiting; the press is seen on this tick, close_message runs on the next one.
     d.press('a');
     expect(d.vm.view().message).not.toBeNull();
@@ -119,6 +120,7 @@ describe('VM semantics', () => {
     const d = driver();
     d.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });
     d.until(() => d.vm.view().message?.waitingForInput === true);
+    expect(d.vm.thread?.contexts[0]?.waitState).toEqual({ kind: 'button' });
     d.press('left');
     expect(d.field.calls).toContain('turnPlayer left');
     expect(d.vm.view().message?.waitingForInput).toBe(false);
