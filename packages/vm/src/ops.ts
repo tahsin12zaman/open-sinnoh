@@ -176,22 +176,18 @@ export function m1aHandlers(r: Runner): Record<string, Handler> {
     // No arrow shows (ScriptView.waitsForAB).
     wait_ab_press: (_t, c) => {
       r.ui.abWait = true;
-      return r.pause(c, (input) => {
-        const done = input.pressed.includes('a') || input.pressed.includes('b');
-        if (done) r.ui.abWait = false;
-        return done;
-      });
+      return r.pause(c, () => false, { kind: 'ab' });
     },
     message_var: (t, c, a) => showText(t, c, r.bankText(localBank(a[1], 'message_var'), val(t, a[0]) & 0xff)),
     // Decomp ScrCmd_MessageNoSkip: ScriptMessage_Show with canSkipDelay FALSE (A and B do not speed it up).
     message_no_skip: (t, c, a) => {
       const p = r.showMessage(t, r.bankText(localBank(a[1], 'message_no_skip'), val(t, a[0]) & 0xff), r.textSpeed(), { canSpeedUp: false });
-      return r.pause(c, () => p.done);
+      return r.pause(c, () => p.done, { kind: 'message' });
     },
     // Decomp ScrCmd_MessageAutoScroll: msgOptions.autoScroll TRUE (AUTO_SCROLL_ENABLED: the box scrolls on its own after a wait).
     message_auto_scroll: (t, c, a) => {
       const p = r.showMessage(t, r.bankText(localBank(a[1], 'message_auto_scroll'), val(t, a[0]) & 0xff), r.textSpeed(), { autoScroll: { skip: false } });
-      return r.pause(c, () => p.done);
+      return r.pause(c, () => p.done, { kind: 'message' });
     },
     buffer_counterpart_name: (t, _c, a) => (slot(t, a[0], r.textOf(r.bankText(BANKS.counterpartNames, r.state.gender === 'male' ? 1 : 0))), 'continue'),
     buffer_number: (t, _c, a) => (slot(t, a[0], String(val(t, a[1]))), 'continue'),
