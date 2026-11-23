@@ -661,7 +661,7 @@ export class Runner implements ScriptRunner {
         }
         if (pick < 0) return false;
         panel.cursor = pick;
-        const selected = this.registries.species.get(panel.options[pick]!.id);
+        const selected = this.registries.species.get(panel.options[pick]!.id as Id);
         if (selected?.sourceIndex === undefined) throw new Error('selected starter has no sourceIndex');
         t.chosenStarter = selected.sourceIndex;
         this.ui.panel = { kind: 'idle', title: '' };
