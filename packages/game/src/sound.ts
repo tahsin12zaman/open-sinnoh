@@ -48,6 +48,17 @@ interface Playing {
   paused: boolean;
   /** Game ticks it has played (not paused). */
   played: number;
+  bank?: Id;
+}
+
+/** Serializable logical audio state; output-device oscillator phase is intentionally external. */
+export interface SoundRuntimeSnapshot {
+  handles: [string, Playing][];
+  state: State; current: Id | null; next: Id | null; fieldBgmId: Id | null;
+  fadeCounter: number; followUpWait: number; followUpFade: number; fanfareDelay: number;
+  fixed: boolean; fieldPaused: boolean; bgmPaused: boolean;
+  scene: 'none' | 'field' | 'battle' | 'cutscene'; special: Id | null;
+  dualCry: boolean; nextCry: number; cryDuration: number | null;
 }
 
 export interface SoundOptions {
@@ -85,6 +96,62 @@ export class SoundSystem implements AudioHost {
   constructor(private readonly o: SoundOptions) {
     this.output = o.output ?? null;
     for (const s of o.registries.sequences.values()) if (s.sourceIndex !== undefined) this.bySource.set(s.sourceIndex, s.id);
+  }
+
+  /** Capture deterministic sound timing and active logical handles at a game-tick boundary. */
+  captureRuntimeSnapshot(): SoundRuntimeSnapshot {
+    return {
+      handles: [...this.handles].map(([name, handle]) => [name, { ...handle }]),
+      state: this.state, current: this.current, next: this.next, fieldBgmId: this.fieldBgmId,
+      fadeCounter: this.fadeCounter, followUpWait: this.followUpWait, followUpFade: this.followUpFade,
+      fanfareDelay: this.fanfareDelay, fixed: this.fixed, fieldPaused: this.fieldPaused,
+      bgmPaused: this.bgmPaused, scene: this.scene, special: this.special,
+      dualCry: this.dualCry, nextCry: this.nextCry, cryDuration: this.cryDuration,
+    };
+  }
+
+  /** Validate without mutating the live mixer. */
+  validateRuntimeSnapshot(value: unknown): value is SoundRuntimeSnapshot {
+    if (!value || typeof value !== 'object') return false;
+    const s = value as Partial<SoundRuntimeSnapshot>;
+    const states: State[] = ['idle', 'play', 'playing', 'fade-in', 'fade-out', 'fade-out-play', 'fade-out-fade-in'];
+    if (!states.includes(s.state as State) || !Array.isArray(s.handles)) return false;
+    if (![s.fadeCounter, s.followUpWait, s.followUpFade, s.fanfareDelay, s.nextCry].every((n) => Number.isInteger(n) && n! >= 0)) return false;
+    if (![s.fixed, s.fieldPaused, s.bgmPaused, s.dualCry].every((v) => typeof v === 'boolean')) return false;
+    if (s.cryDuration !== null && (!Number.isInteger(s.cryDuration) || s.cryDuration! < 0)) return false;
+    if (!['none', 'field', 'battle', 'cutscene'].includes(s.scene as string)) return false;
+    const names = new Set<string>();
+    for (const entry of s.handles) {
+      if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || names.has(entry[0])) return false;
+      names.add(entry[0]);
+      const h = entry[1] as Playing;
+      if (!h || typeof h.seq !== 'string' || !Number.isInteger(h.player) || h.player < 0 || h.player > 7 ||
+          (h.left !== null && (!Number.isInteger(h.left) || h.left < 0)) ||
+          typeof h.paused !== 'boolean' || !Number.isInteger(h.played) || h.played < 0 ||
+          (h.bank !== undefined && typeof h.bank !== 'string') || !this.o.registries.sequences.has(h.seq)) return false;
+    }
+    for (const id of [s.current, s.next, s.fieldBgmId, s.special]) if (id !== null && id !== undefined && typeof id !== 'string') return false;
+    return true;
+  }
+
+  /** Restore logical playback and reissue starts to the currently attached output. */
+  restoreRuntimeSnapshot(value: unknown): void {
+    if (!this.validateRuntimeSnapshot(value)) throw new Error('invalid sound runtime snapshot');
+    const s = value;
+    this.send({ op: 'stop-all' });
+    this.handles.clear();
+    for (const [name, handle] of s.handles) {
+      this.handles.set(name, { ...handle });
+      this.send(handle.bank
+        ? { op: 'start', handle: name, seq: handle.seq, bank: handle.bank }
+        : { op: 'start', handle: name, seq: handle.seq });
+      if (handle.paused) this.send({ op: 'pause', handle: name, paused: true });
+    }
+    this.state = s.state; this.current = s.current; this.next = s.next; this.fieldBgmId = s.fieldBgmId;
+    this.fadeCounter = s.fadeCounter; this.followUpWait = s.followUpWait; this.followUpFade = s.followUpFade;
+    this.fanfareDelay = s.fanfareDelay; this.fixed = s.fixed; this.fieldPaused = s.fieldPaused;
+    this.bgmPaused = s.bgmPaused; this.scene = s.scene; this.special = s.special;
+    this.dualCry = s.dualCry; this.nextCry = s.nextCry; this.cryDuration = s.cryDuration;
   }
 
   /** A decomp sequence number (`sourceIndex`) → its record; a pack without it plays nothing (logged). */
@@ -127,7 +194,7 @@ export class SoundSystem implements AudioHost {
   }
 
   private start(handle: string, seq: Id, frames: number | null, bank?: Id): void {
-    this.handles.set(handle, { seq, player: this.playerOf(seq), left: frames === null ? null : soundFramesToTicks(frames), paused: false, played: 0 });
+    this.handles.set(handle, { seq, player: this.playerOf(seq), left: frames === null ? null : soundFramesToTicks(frames), paused: false, played: 0, ...(bank ? { bank } : {}) });
     this.send(bank ? { op: 'start', handle, seq, bank } : { op: 'start', handle, seq });
   }
 
