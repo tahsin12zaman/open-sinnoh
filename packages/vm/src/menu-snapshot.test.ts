@@ -1,3 +1,4 @@
+import type { InputFrame } from '@opensinnoh/contracts';
 import { describe, expect, it } from 'vitest';
 import { ScriptMenu } from './menu.ts';
 
@@ -6,7 +7,7 @@ describe('scripted-menu runtime snapshots', () => {
     const menu = new ScriptMenu({ x: 12, y: 8 }, 0, true, 204);
     for (let i = 0; i < 12; i++) menu.add({ text: `Entry ${i}`, index: i });
     menu.show('list', (text) => text.length * 8);
-    const input = { held: [] as never[], pressed: ['down'] as never[], touch: null };
+    const input: InputFrame = { held: [], pressed: ['down'], touch: null };
     menu.step(input, null);
     menu.step(input, null);
     menu.step(input, null);
