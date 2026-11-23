@@ -80,6 +80,24 @@ export interface PrinterInput {
   touchHeld?: boolean;
 }
 
+export interface TextPrinterRuntimeSnapshot {
+  ops: PrintOp[];
+  options: Omit<PrinterOptions, 'callback'>;
+  state: State;
+  i: number;
+  delay: number;
+  speedBottom: number;
+  speedUp: boolean;
+  scrollLeft: number;
+  rows: string[];
+  shown: string[];
+  row: number;
+  autoScrollDelay: number;
+  callbackParam: number;
+  callbackWaiting: boolean;
+  continued: boolean;
+}
+
 export interface PrinterOptions {
   speed?: number;
   /** RenderControlFlags canABSpeedUpPrint. */
@@ -124,6 +142,63 @@ export class TextPrinter {
 
   get done(): boolean {
     return this.state === 'done';
+  }
+
+  /** Captures every deterministic printer accumulator; callback-backed printers are not portable. */
+  captureRuntimeSnapshot(): TextPrinterRuntimeSnapshot {
+    if (this.opts.callback) throw new Error('text printer has a live callback and cannot be snapshotted');
+    return structuredClone({
+      ops: this.ops,
+      options: {
+        speed: this.speedBottom === 0 ? 0 : this.speedBottom + 1,
+        ...(this.opts.canSpeedUp !== undefined ? { canSpeedUp: this.opts.canSpeedUp } : {}),
+        ...(this.opts.speedUpOnTouch !== undefined ? { speedUpOnTouch: this.opts.speedUpOnTouch } : {}),
+        ...(this.opts.autoScroll !== undefined ? { autoScroll: this.opts.autoScroll } : {}),
+      },
+      state: this.state,
+      i: this.i,
+      delay: this.delay,
+      speedBottom: this.speedBottom,
+      speedUp: this.speedUp,
+      scrollLeft: this.scrollLeft,
+      rows: this.rows,
+      shown: this.shown,
+      row: this.row,
+      autoScrollDelay: this.autoScrollDelay,
+      callbackParam: this.callbackParam,
+      callbackWaiting: this.callbackWaiting,
+      continued: this.continued,
+    });
+  }
+
+  /** Rehydrates a printer without replaying its constructor's instant-print side effects. */
+  static fromRuntimeSnapshot(snapshot: TextPrinterRuntimeSnapshot): TextPrinter {
+    if (!snapshot || !Array.isArray(snapshot.ops) || !snapshot.options || !Array.isArray(snapshot.rows) || !Array.isArray(snapshot.shown)) {
+      throw new Error('malformed text-printer runtime snapshot');
+    }
+    if (snapshot.options.callback !== undefined) throw new Error('text-printer snapshot cannot contain a callback');
+    if (!['char', 'clear', 'start-scroll', 'scroll', 'pause', 'done'].includes(snapshot.state)) {
+      throw new Error('invalid text-printer state');
+    }
+    const printer = new TextPrinter(snapshot.ops, snapshot.options);
+    printer.state = snapshot.state;
+    printer.i = snapshot.i;
+    printer.delay = snapshot.delay;
+    printer.speedUp = snapshot.speedUp;
+    printer.scrollLeft = snapshot.scrollLeft;
+    printer.rows = [...snapshot.rows];
+    printer.shown = [...snapshot.shown];
+    printer.row = snapshot.row;
+    printer.autoScrollDelay = snapshot.autoScrollDelay;
+    printer.callbackParam = snapshot.callbackParam;
+    printer.callbackWaiting = snapshot.callbackWaiting;
+    printer.continued = snapshot.continued;
+    if (![printer.i, printer.delay, printer.scrollLeft, printer.row, printer.autoScrollDelay, printer.callbackParam].every(Number.isSafeInteger)
+      || printer.i < 0 || printer.i > snapshot.ops.length || printer.delay < 0 || printer.scrollLeft < 0
+      || printer.row < 0 || printer.autoScrollDelay < 0) {
+      throw new Error('invalid text-printer runtime counters');
+    }
+    return printer;
   }
 
   /** Waiting for A/B at a {clear} or {scroll}. */
