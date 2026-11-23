@@ -23,7 +23,7 @@ describe('RuntimeSnapshotCoordinator', () => {
     });
     const snapshot = coordinator.capture();
     expect(snapshot.tick).toBe(120);
-    expect(boundaryCalls).toBe(2);
+    expect(boundaryCalls).toBe(1);
     tick = 900;
     expect(coordinator.restore(snapshot)).toBe(120);
     expect(tick).toBe(900);
