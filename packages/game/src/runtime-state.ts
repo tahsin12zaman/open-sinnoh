@@ -45,7 +45,13 @@ function assertJsonValue(value: unknown, path = 'payload', seen = new Set<object
   }
   seen.add(value);
   if (Array.isArray(value)) {
-    value.forEach((item, index) => assertJsonValue(item, `${path}[${index}]`, seen));
+    for (let index = 0; index < value.length; index++) {
+      if (!(index in value)) throw new Error(`runtime state ${path} contains an array hole at ${index}`);
+      assertJsonValue(value[index], `${path}[${index}]`, seen);
+    }
+    for (const key of Object.keys(value)) {
+      if (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length) throw new Error(`runtime state ${path} contains a non-index array property`);
+    }
   } else {
     for (const [key, item] of Object.entries(value)) assertJsonValue(item, `${path}.${key}`, seen);
     for (const key of Object.getOwnPropertySymbols(value)) {
