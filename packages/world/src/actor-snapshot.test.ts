@@ -3,7 +3,7 @@ import { captureActorSnapshot, restoreActorSnapshot, validateActorSnapshot } fro
 import { createActor, walk, type Actor } from './npc.ts';
 
 function actor(): Actor {
-  const a = createActor(7, 'NPC_TEST', 12, 9, 0, 'down', 3, 'TEST_ZONE');
+  const a = createActor(7, 'TEST:NPC', 12, 9, 0, 'down', 3, 'TEST:ZONE');
   a.type = {
     originX: 12, originZ: 9, rng: { seed: 0x12345678 }, initial: 'down',
     phase: 'delay', timer: 17, returning: false, loop: 2,
@@ -26,7 +26,7 @@ describe('actor runtime snapshots', () => {
     source.type!.rng.seed = 1;
     source.frames.frame = 0;
 
-    const target = createActor(7, 'NPC_TEST', 0, 0, 0, 'up', 0, 'TEST_ZONE');
+    const target = createActor(7, 'TEST:NPC', 0, 0, 0, 'up', 0, 'TEST:ZONE');
     restoreActorSnapshot(target, snapshot);
 
     expect(target.localId).toBe(7);
