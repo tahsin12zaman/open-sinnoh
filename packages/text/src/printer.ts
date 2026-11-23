@@ -176,11 +176,11 @@ export class TextPrinter {
     if (!snapshot || !Array.isArray(snapshot.ops) || !snapshot.options || !Array.isArray(snapshot.rows) || !Array.isArray(snapshot.shown)) {
       throw new Error('malformed text-printer runtime snapshot');
     }
-    if (snapshot.options.callback !== undefined) throw new Error('text-printer snapshot cannot contain a callback');
     if (!['char', 'clear', 'start-scroll', 'scroll', 'pause', 'done'].includes(snapshot.state)) {
       throw new Error('invalid text-printer state');
     }
     const printer = new TextPrinter(snapshot.ops, snapshot.options);
+    if (printer.speedBottom !== snapshot.speedBottom) throw new Error('text-printer speed does not match its snapshot');
     printer.state = snapshot.state;
     printer.i = snapshot.i;
     printer.delay = snapshot.delay;
