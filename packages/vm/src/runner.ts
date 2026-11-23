@@ -85,6 +85,7 @@ export type RuntimeWait =
   | { kind: 'common-script' }
   | { kind: 'message' }
   | { kind: 'button' }
+  | { kind: 'ab' }
   | { kind: 'yes-no'; variable: Id }
   | { kind: 'signpost-done' }
   | { kind: 'movement' }
@@ -634,6 +635,11 @@ export class Runner implements ScriptRunner {
         this.setVar(t, wait.variable, result);
         this.ui.yesNo = null;
         return true;
+      }
+      case 'ab': {
+        const done = has(input.pressed, 'a') || has(input.pressed, 'b');
+        if (done) this.ui.abWait = false;
+        return done;
       }
       case 'button': {
         let done = has(input.pressed, 'a') || has(input.pressed, 'b');
