@@ -81,7 +81,7 @@ export interface PrinterInput {
 }
 
 export interface TextPrinterRuntimeSnapshot {
-  ops: PrintOp[];
+  ops: readonly PrintOp[];
   options: Omit<PrinterOptions, 'callback'>;
   state: State;
   i: number;
