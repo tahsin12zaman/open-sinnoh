@@ -966,7 +966,7 @@ export class Runner implements ScriptRunner {
         return 'yield';
       },
       draw_signpost_scrolling_message: (t, c, a) => {
-        const p = this.showMessage(t, this.ref(a[0], 'text'), this.textSpeed());
+        this.showMessage(t, this.ref(a[0], 'text'), this.textSpeed());
         const dest = this.ref(a[1], 'var');
         return this.pause(c, () => false, { kind: 'signpost-scroll', variable: dest });
       },
