@@ -85,6 +85,7 @@ export type RuntimeWait =
   | { kind: 'common-script' }
   | { kind: 'message' }
   | { kind: 'button' }
+  | { kind: 'yes-no'; variable: Id }
   | { kind: 'signpost-done' }
   | { kind: 'movement' }
   | { kind: 'follower' }
@@ -616,6 +617,21 @@ export class Runner implements ScriptRunner {
       }
       case 'common-script': return !t.subActive;
       case 'message': return this.ui.message?.printer.done ?? true;
+      case 'yes-no': {
+        const box = this.ui.yesNo;
+        if (!box) throw new Error('yes/no runtime wait has no menu');
+        const before = box.cursor;
+        let result: number | null = null;
+        if (has(input.pressed, 'a')) result = box.cursor;
+        else if (has(input.pressed, 'b')) result = 1;
+        else if (has(input.pressed, 'up')) box.cursor = 0;
+        else if (has(input.pressed, 'down')) box.cursor = 1;
+        if (result !== null || box.cursor !== before) this.playFieldSe(SE_CONFIRM);
+        if (result === null) return false;
+        this.setVar(t, wait.variable, result);
+        this.ui.yesNo = null;
+        return true;
+      }
       case 'button': {
         let done = has(input.pressed, 'a') || has(input.pressed, 'b');
         const dir = done ? -1 : DIR_BUTTONS.findIndex((b) => has(input.pressed, b));
@@ -868,7 +884,7 @@ export class Runner implements ScriptRunner {
       },
       // Decomp ScrCmd_MessageInstant → ScriptMessage_ShowInstant: the whole message at once; the script goes on.
       message_instant: (t, _c, a) => (this.showMessage(t, this.ref(a[0], 'text'), TEXT_SPEED.instant), 'continue'),
-      wait_button: (t, c) => this.pause(c, this.waitButton(t)),
+      wait_button: (t, c) => this.pause(c, this.waitButton(t), { kind: 'button' }),
       close_message: () => ((this.ui.message = null), 'continue'),
       show_yes_no_menu: (t, c, a) => {
         const dest = this.ref(a[0], 'var');
@@ -885,7 +901,7 @@ export class Runner implements ScriptRunner {
           this.setVar(t, dest, result);
           this.ui.yesNo = null;
           return true;
-        });
+        }, { kind: 'yes-no', variable: dest });
       },
       // Signposts (decomp scrcmd.c Signpost commands; the window slides in/out in stepSignpost).
       draw_signpost_text_box: (t, _c, a) => {
