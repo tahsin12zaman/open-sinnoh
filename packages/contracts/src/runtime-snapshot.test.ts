@@ -27,6 +27,10 @@ const snapshot: RuntimeSnapshot = {
   },
 };
 
+function validationError(result: ReturnType<typeof validateRuntimeSnapshot> | ReturnType<typeof parseRuntimeSnapshot>) {
+  return 'error' in result ? result.error : undefined;
+}
+
 describe('runtime snapshot envelope', () => {
   it('round-trips JSON while preserving tick and transient subsystem data', () => {
     const parsed = parseRuntimeSnapshot(serializeRuntimeSnapshot(snapshot), compatibility);
@@ -39,16 +43,16 @@ describe('runtime snapshot envelope', () => {
   });
 
   it('rejects unsupported versions, incompatible builds and corrupt JSON', () => {
-    expect(validateRuntimeSnapshot({ ...snapshot, version: 99 }).error).toBe('unsupported-version');
-    expect(validateRuntimeSnapshot(snapshot, { ...compatibility, build: 'other' }).error).toBe('incompatible-build');
-    expect(parseRuntimeSnapshot('{not json').error).toBe('invalid-json');
+    expect(validationError(validateRuntimeSnapshot({ ...snapshot, version: 99 }))).toBe('unsupported-version');
+    expect(validationError(validateRuntimeSnapshot(snapshot, { ...compatibility, build: 'other' }))).toBe('incompatible-build');
+    expect(validationError(parseRuntimeSnapshot('{not json'))).toBe('invalid-json');
   });
 
   it('rejects missing references and non-JSON runtime values', () => {
-    expect(validateRuntimeSnapshot({ ...snapshot, references: { actors: ['bad'], threads: [] } }).error).toBe('invalid-references');
+    expect(validationError(validateRuntimeSnapshot({ ...snapshot, references: { actors: ['bad'], threads: [] } }))).toBe('invalid-references');
     const invalid = structuredClone(snapshot) as unknown as { subsystems: Record<string, unknown> };
     invalid.subsystems.vm = { callback: () => undefined };
-    expect(validateRuntimeSnapshot(invalid).error).toBe('invalid-subsystem-data');
+    expect(validationError(validateRuntimeSnapshot(invalid))).toBe('invalid-subsystem-data');
   });
 
   it('persists and independently loads multiple slots', async () => {
