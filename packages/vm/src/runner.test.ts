@@ -4,6 +4,7 @@ import { hitChoice, choiceRects } from '@opensinnoh/text';
 import { Driver, loadFixture, newState, testMon } from './test-support.ts';
 import { coverage, implementedOps } from './coverage.ts';
 import { COMMAND_BY_NAME } from './commands.ts';
+import { Runner } from './runner.ts';
 
 const fixture = loadFixture();
 const driver = () => new Driver(fixture.registries, fixture.labels, newState());
@@ -29,7 +30,7 @@ describe('VM on the fixture scripts', () => {
     // "Is this the one?" → No: back to the choice.
     d.until(() => d.vm.view().yesNo !== null);
     expect(d.vm.view().message?.text).toBe('Is this the one you want?');
-    expect(d.vm.thread?.contexts[0]?.waitState).toMatchObject({ kind: 'yes-no' });
+    expect((d.vm as Runner).thread?.contexts[0]?.waitState).toMatchObject({ kind: 'yes-no' });
     d.press('down');
     expect(d.vm.view().yesNo).toEqual({ yes: 'YES', no: 'NO', cursor: 1 });
     d.press('a');
