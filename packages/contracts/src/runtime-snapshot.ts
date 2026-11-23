@@ -109,8 +109,12 @@ export function validateRuntimeSnapshot(value: unknown, target?: RuntimeSnapshot
       !value.references.threads.every((id) => typeof id === 'string' && id.length > 0)) {
     return { ok: false, error: 'invalid-references', detail: 'Snapshot stable-reference table is invalid.' };
   }
-  if (!isRecord(value.subsystems) || !SUBSYSTEMS.every((key) =>
-    Object.prototype.hasOwnProperty.call(value.subsystems, key) && isJsonValue(value.subsystems[key]))) {
+  if (!isRecord(value.subsystems)) {
+    return { ok: false, error: 'invalid-subsystem-data', detail: 'Snapshot subsystem data is incomplete or contains non-JSON values.' };
+  }
+  const subsystems = value.subsystems;
+  if (!SUBSYSTEMS.every((key) =>
+    Object.prototype.hasOwnProperty.call(subsystems, key) && isJsonValue(subsystems[key]))) {
     return { ok: false, error: 'invalid-subsystem-data', detail: 'Snapshot subsystem data is incomplete or contains non-JSON values.' };
   }
   return { ok: true, snapshot: value as unknown as RuntimeSnapshot };
