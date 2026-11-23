@@ -29,6 +29,7 @@ describe('VM on the fixture scripts', () => {
     // "Is this the one?" → No: back to the choice.
     d.until(() => d.vm.view().yesNo !== null);
     expect(d.vm.view().message?.text).toBe('Is this the one you want?');
+    expect(d.vm.thread?.contexts[0]?.waitState).toMatchObject({ kind: 'yes-no' });
     d.press('down');
     expect(d.vm.view().yesNo).toEqual({ yes: 'YES', no: 'NO', cursor: 1 });
     d.press('a');
