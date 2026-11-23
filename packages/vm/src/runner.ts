@@ -91,7 +91,10 @@ export type RuntimeWait =
   | { kind: 'follower' }
   | { kind: 'fade' }
   | { kind: 'warp' }
-  | { kind: 'door' };
+  | { kind: 'door' }
+  | { kind: 'starter-choice' }
+  | { kind: 'signpost-scroll'; variable: Id }
+  | { kind: 'signpost-input'; variable: Id };
 
 export interface Context {
   label: Id;
@@ -646,6 +649,46 @@ export class Runner implements ScriptRunner {
       case 'fade': return this.field.fadeDone();
       case 'warp': return this.field.warpDone();
       case 'door': return this.field.doorDone();
+      case 'starter-choice': {
+        const panel = this.ui.panel;
+        if (panel.kind !== 'choice') throw new Error('starter-choice runtime wait has no choice panel');
+        let pick = -1;
+        if (input.touch && input.touch.screen !== 'main' && !this.lastTouch) pick = hitChoice(panel.options.length, input.touch);
+        if (pick < 0) {
+          if (has(input.pressed, 'up') || has(input.pressed, 'left')) panel.cursor = Math.max(0, panel.cursor - 1);
+          else if (has(input.pressed, 'down') || has(input.pressed, 'right')) panel.cursor = Math.min(panel.options.length - 1, panel.cursor + 1);
+          else if (has(input.pressed, 'a')) pick = panel.cursor;
+        }
+        if (pick < 0) return false;
+        panel.cursor = pick;
+        const selected = this.registries.species.get(panel.options[pick]!.id);
+        if (selected?.sourceIndex === undefined) throw new Error('selected starter has no sourceIndex');
+        t.chosenStarter = selected.sourceIndex;
+        this.ui.panel = { kind: 'idle', title: '' };
+        return true;
+      }
+      case 'signpost-scroll': {
+        const printer = this.ui.message?.printer;
+        if (!printer) throw new Error('signpost-scroll runtime wait has no message printer');
+        let result: number | null = null;
+        const dir = DIR_BUTTONS.findIndex((b) => has(input.pressed, b));
+        if (printer.done) result = 2;
+        else if (dir >= 0) { this.field.turnPlayer(DIRS[dir]!); result = 0; }
+        else if (has(input.pressed, 'x')) result = 1;
+        if (result === null) return false;
+        this.setVar(t, wait.variable, result);
+        return true;
+      }
+      case 'signpost-input': {
+        let result: number | null = null;
+        const dir = DIR_BUTTONS.findIndex((b) => has(input.pressed, b));
+        if (has(input.pressed, 'a') || has(input.pressed, 'b')) result = 0;
+        else if (dir >= 0) { this.field.turnPlayer(DIRS[dir]!); result = 0; }
+        else if (has(input.pressed, 'x')) result = 1;
+        if (result === null) return false;
+        this.setVar(t, wait.variable, result);
+        return true;
+      }
     }
   }
 
@@ -925,33 +968,11 @@ export class Runner implements ScriptRunner {
       draw_signpost_scrolling_message: (t, c, a) => {
         const p = this.showMessage(t, this.ref(a[0], 'text'), this.textSpeed());
         const dest = this.ref(a[1], 'var');
-        return this.pause(c, (input) => {
-          let r: number | null = null;
-          const dir = DIR_BUTTONS.findIndex((b) => has(input.pressed, b));
-          if (p.done) r = 2;
-          else if (dir >= 0) {
-            this.field.turnPlayer(DIRS[dir]!);
-            r = 0;
-          } else if (has(input.pressed, 'x')) r = 1;
-          if (r === null) return false;
-          this.setVar(t, dest, r);
-          return true;
-        });
+        return this.pause(c, () => false, { kind: 'signpost-scroll', variable: dest });
       },
       get_signpost_input: (t, c, a) => {
         const dest = this.ref(a[0], 'var');
-        return this.pause(c, (input) => {
-          let r: number | null = null;
-          const dir = DIR_BUTTONS.findIndex((b) => has(input.pressed, b));
-          if (has(input.pressed, 'a') || has(input.pressed, 'b')) r = 0;
-          else if (dir >= 0) {
-            this.field.turnPlayer(DIRS[dir]!);
-            r = 0;
-          } else if (has(input.pressed, 'x')) r = 1;
-          if (r === null) return false;
-          this.setVar(t, dest, r);
-          return true;
-        });
+        return this.pause(c, () => false, { kind: 'signpost-input', variable: dest });
       },
       show_start_menu: (t) => ((t.startMenu = true), 'continue'),
 
@@ -1047,21 +1068,7 @@ export class Runner implements ScriptRunner {
         const title = this.plainText(this.bankText(BANKS.chooseStarter, CHOOSE_STARTER_PROMPT));
         const panel = { kind: 'choice' as const, title, options: options.map((s) => ({ id: s.id, label: s.name })), cursor: 0 };
         this.ui.panel = panel;
-        return this.pause(c, (input) => {
-          let pick = -1;
-          if (input.touch && input.touch.screen !== 'main' && !this.lastTouch) pick = hitChoice(options.length, input.touch);
-          if (pick < 0) {
-            if (has(input.pressed, 'up') || has(input.pressed, 'left')) panel.cursor = Math.max(0, panel.cursor - 1);
-            else if (has(input.pressed, 'down') || has(input.pressed, 'right')) panel.cursor = Math.min(options.length - 1, panel.cursor + 1);
-            else if (has(input.pressed, 'a')) pick = panel.cursor;
-          }
-          if (pick < 0) return false;
-          panel.cursor = pick;
-          t.chosenStarter = options[pick]!.sourceIndex ?? null;
-          if (t.chosenStarter === null) throw new Error(`starter ${options[pick]!.id} has no sourceIndex`);
-          this.ui.panel = { kind: 'idle', title: '' };
-          return true;
-        });
+        return this.pause(c, () => false, { kind: 'starter-choice' });
       },
       save_chosen_starter: (t) => {
         if (t.chosenStarter === null) throw new Error('save_chosen_starter before start_choose_starter_scene');
