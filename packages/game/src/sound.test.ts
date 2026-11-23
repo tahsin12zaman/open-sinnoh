@@ -199,3 +199,30 @@ describe('SoundSystem', () => {
     expect(silent.sound.currentBgm()).toBe(game.sound.currentBgm());
   });
 });
+
+
+describe('SoundSystem runtime snapshots', () => {
+  it('restores active handles and fade timing for deterministic continuation', () => {
+    const a = system();
+    a.sound.playForZone(F('TOWN'));
+    a.sound.fadeOutBgm(0, 12);
+    ticks(a.sound, 3);
+    const snapshot = JSON.parse(JSON.stringify(a.sound.captureRuntimeSnapshot()));
+    const b = system();
+    expect(b.sound.validateRuntimeSnapshot(snapshot)).toBe(true);
+    b.sound.restoreRuntimeSnapshot(snapshot);
+    expect(b.sound.captureRuntimeSnapshot()).toEqual(snapshot);
+    ticks(a.sound, 5);
+    ticks(b.sound, 5);
+    expect(b.sound.captureRuntimeSnapshot()).toEqual(a.sound.captureRuntimeSnapshot());
+  });
+
+  it('rejects malformed sound snapshots without changing live playback', () => {
+    const { sound } = system();
+    sound.playForZone(F('TOWN'));
+    const before = sound.captureRuntimeSnapshot();
+    expect(sound.validateRuntimeSnapshot({ ...before, fadeCounter: -1 })).toBe(false);
+    expect(() => sound.restoreRuntimeSnapshot({ ...before, handles: [['bad', { seq: 'missing', player: 1, left: null, paused: false, played: 0 }]] })).toThrow();
+    expect(sound.captureRuntimeSnapshot()).toEqual(before);
+  });
+});
