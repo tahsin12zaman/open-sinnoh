@@ -218,3 +218,136 @@ test:Deep::
   it('show_start_menu and X in a button wait request the start menu once the script ends', () => {
     const d = run(`
 test:Menu::
+  show_start_menu
+  wait_time 2, var(fixture:VAR_RESULT)
+  end
+`);
+    d.vm.start({ label: 'test:Menu', zone: 'fixture:TOWN', source: 'test' });
+    d.tick();
+    expect(d.vm.takeStartMenuRequest()).toBe(false);
+    d.until(() => !d.vm.running());
+    expect(d.vm.takeStartMenuRequest()).toBe(true);
+    expect(d.vm.takeStartMenuRequest()).toBe(false);
+
+    const w = driver();
+    w.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });
+    w.until(() => w.vm.view().message?.waitingForInput === true);
+    w.press('x');
+    w.until(() => !w.vm.running());
+    expect(w.vm.takeStartMenuRequest()).toBe(true);
+  });
+
+  it('the starter choice is titled with the scene bank prompt; messages print at the text speed option', () => {
+    const d = run(`
+test:Choose::
+  start_choose_starter_scene
+  end
+`);
+    d.vm.start({ label: 'test:Choose', zone: 'fixture:TOWN', source: 'test' });
+    d.tick();
+    expect(d.vm.view().panel).toMatchObject({ kind: 'choice', title: 'Pick one! Which companion will it be?' });
+
+    const fast = driver();
+    fast.textSpeed = 1;
+    fast.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });
+    fast.tick();
+    fast.tick();
+    fast.tick();
+    expect(fast.vm.view().message?.text).toBe('Morn'); // 1 char per render call, 2 per tick
+  });
+
+  it('buffer_pocket_name reads the pocket-name text (markup kept); player names are escaped', () => {
+    const texts = new Map(fixture.registries.texts);
+    // Original stand-ins for the imported pocket-name bank (one message per pocket).
+    texts.set('platinum:pl_msg_00000396_00003' as Id, { id: 'platinum:pl_msg_00000396_00003' as Id, text: '{color 2}#{color 0}Tools' });
+    texts.set('test:Line' as Id, { id: 'test:Line' as Id, text: '{var 1} put it in {var 0}.' });
+    const labels = new Map([...fixture.labels, ...Object.entries(parseIR(`
+test:Pocket::
+  buffer_pocket_name 0, 3
+  buffer_player_name 1
+  message text(test:Line)
+  wait_button
+  end
+`).labels).map(([id, commands]) => [id as Id, { pack: 'test', commands }] as const)]);
+    const state = newState();
+    state.names.player = 'A{b}';
+    const d = new Driver({ ...fixture.registries, texts }, labels, state);
+    d.vm.start({ label: 'test:Pocket', zone: 'fixture:TOWN', source: 'test' });
+    d.readMessage('A{b} put it in #Tools.');
+  });
+
+  it('lock_all waits for a moving partner follower, then yields', () => {
+    const d = run(`
+test:Lock::
+  lock_all
+  set_var_from_value var(fixture:VAR_SCENE), 1
+  end
+`);
+    d.state.hasPartner = true;
+    let moving = 3;
+    d.field.objectMoving = () => moving > 0;
+    d.vm.start({ label: 'test:Lock', zone: 'fixture:TOWN', source: 'test' });
+    d.tick();
+    d.tick();
+    expect(d.state.vars['fixture:VAR_SCENE']).toBeUndefined();
+    moving = 0;
+    d.tick(); // the wait ends (resume tick, no command)
+    d.tick();
+    expect(d.state.vars['fixture:VAR_SCENE']).toBe(1);
+  });
+
+  it('heal_party restores HP, status and PP (PP Ups included); eggs are left alone', () => {
+    const d = run(`
+test:Heal::
+  heal_party
+  end
+`);
+    const m = testMon(d.registries, 'fixture:SPECIES_MOSSLET', 10);
+    Object.assign(m, { hp: 1, status: 'poison', pp: m.pp.map(() => 0), ppUps: m.ppUps.map(() => 3) });
+    d.state.party.push(m);
+    d.vm.start({ label: 'test:Heal', zone: 'fixture:TOWN', source: 'test' });
+    d.tick();
+    expect([m.hp, m.status]).toEqual([m.stats.hp, 'none']);
+    expect(m.pp).toEqual([56, 48, 40]); // Bop 35, Stare 30, Leaf Tap 25, each +60% (3 PP Ups)
+    expect(d.log.keys.get('stub:heal_party')).toBeUndefined();
+  });
+
+  it('unclassified ops log once per op and continue; bucket stubs return 0', () => {
+    const d = run(`
+test:Unknown::
+  set_var_from_value var(fixture:VAR_RESULT), 7
+  check_step_flag var(fixture:VAR_RESULT)
+  check_step_flag var(fixture:VAR_RESULT)
+  set_var_from_value var(fixture:VAR_SCENE), 7
+  check_has_enough_mon_for_catching_show var(fixture:VAR_SCENE)
+  scr_cmd_1e4 var(fixture:VAR_SCENE)
+  end
+`);
+    d.vm.start({ label: 'test:Unknown', zone: 'fixture:TOWN', source: 'test' });
+    d.tick();
+    expect(d.vm.running()).toBe(false);
+    expect(d.log.keys.get('cmd:check_step_flag')).toBe(2); // StubLog dedupes; the VM reports every hit
+    expect(d.log.keys.get('stub:check_has_enough_mon_for_catching_show')).toBe(1);
+    expect(d.log.keys.get('stub:scr_cmd_1e4')).toBe(1);
+    expect(d.state.vars['fixture:VAR_SCENE']).toBeUndefined(); // the stub returned 0 (the initial value)
+  });
+
+});
+
+describe('coverage', () => {
+  it('every implemented op is a real command; fixture ops are all implemented', () => {
+    for (const op of implementedOps()) expect(COMMAND_BY_NAME.has(op), op).toBe(true);
+    const c = coverage([...fixture.labels.values()].map((l) => l.commands));
+    expect(c.usedMissing).toEqual([]);
+  });
+
+  it('implements the 94 slice commands (research §7)', () => {
+    const slice =
+      'end wait_time compare_var_to_value call_common_script return_common_script go_to call return go_to_if call_if set_flag clear_flag check_flag add_var set_var_from_value set_var_from_var message wait_button close_message draw_signpost_instant_message draw_signpost_text_box set_signpost_command wait_for_signpost_done draw_signpost_scrolling_message get_signpost_input show_start_menu show_yes_no_menu play_se wait_se play_cry wait_cry play_fanfare wait_fanfare play_music stop_music play_default_music fade_out_bgm set_bgm apply_movement wait_movement lock_all release_all lock_object add_object remove_object add_free_camera restore_camera face_player get_player_map_pos set_object_flag_is_persistent set_movement_type add_item can_fit_item get_item_pocket give_pokemon return_to_field start_choose_starter_scene save_chosen_starter fade_screen wait_fade_screen warp buffer_player_name buffer_rival_name buffer_item_name buffer_pocket_name buffer_rival_starter_species_name get_player_starter_species check_won_battle start_first_battle get_player_gender heal_party give_running_shoes set_has_partner clear_has_partner set_step_flag load_door_animation wait_for_animation unload_animation play_door_open_animation play_door_close_animation set_object_event_pos set_object_event_movement_type set_object_event_dir set_warp_event_pos get_time_of_day get_random get_player_dir init_size_contest_record give_journal randomize_jubilife_lottery init_daily_random_level set_initial_volume_for_sequence check_item_is_plate buffer_item_name_plural'.split(
+        ' ',
+      );
+    expect(slice.length).toBe(94);
+    const impl = new Set(implementedOps());
+    expect(slice.filter((op) => !impl.has(op))).toEqual([]);
+  });
+});
