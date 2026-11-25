@@ -95,7 +95,20 @@ export type RuntimeWait =
   | { kind: 'door' }
   | { kind: 'starter-choice' }
   | { kind: 'signpost-scroll'; variable: Id }
-  | { kind: 'signpost-input'; variable: Id };
+  | { kind: 'signpost-input'; variable: Id }
+  | { kind: 'watering' }
+  | { kind: 'heal-animation' }
+  | { kind: 'sunyshore-button' }
+  | { kind: 'boat-cutscene' }
+  | { kind: 'pastoria-button' }
+  | { kind: 'marsh-tram' }
+  | { kind: 'marsh-lookout' }
+  | { kind: 'hm-cut-in' }
+  | { kind: 'shake-object' }
+  | { kind: 'platform-lift' }
+  | { kind: 'elevator' }
+  | { kind: 'containment' }
+  | { kind: 'vista-binoculars' };
 
 export interface Context {
   label: Id;
@@ -655,6 +668,29 @@ export class Runner implements ScriptRunner {
       case 'fade': return this.field.fadeDone();
       case 'warp': return this.field.warpDone();
       case 'door': return this.field.doorDone();
+      case 'watering': return this.field.wateringDone();
+      case 'heal-animation':
+        return this.field.healAnimationDone();
+      case 'sunyshore-button':
+        return this.field.sunyshoreGymButtonDone();
+      case 'boat-cutscene':
+        return this.field.boatCutsceneDone();
+      case 'pastoria-button':
+        return this.field.pastoriaGymButtonDone();
+      case 'marsh-tram':
+        return this.field.greatMarshTramDone();
+      case 'marsh-lookout':
+        return this.field.greatMarshLookoutDone();
+      case 'hm-cut-in': return this.field.hmCutInDone();
+      case 'shake-object':
+        return this.field.shakeObjectDone();
+      case 'platform-lift':
+        return this.field.platformLiftDone();
+      case 'elevator': return this.field.elevatorDone();
+      case 'containment':
+        return this.field.containmentUnitsDone();
+      case 'vista-binoculars':
+        return this.field.vistaBinocularsDone();
       case 'starter-choice': {
         const panel = this.ui.panel;
         if (panel.kind !== 'choice') throw new Error('starter-choice runtime wait has no choice panel');

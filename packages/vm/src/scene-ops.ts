@@ -126,7 +126,7 @@ export function sceneHandlers(r: Runner): Record<string, Handler> {
     },
     deactivate_lake_guardian_containment_units: (_t, c) => {
       r.field.deactivateContainmentUnits();
-      return r.pause(c, () => r.field.containmentUnitsDone());
+      return r.pause(c, () => r.field.containmentUnitsDone(), { kind: 'containment' });
     },
     /**
      * ScrCmd_29F (a var): 0 shakes 2 units for 16 cycles; otherwise the BGM fades out (1), 16 callbacks pass,

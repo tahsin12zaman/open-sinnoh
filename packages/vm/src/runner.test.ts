@@ -130,7 +130,7 @@ test:WaitAB::
     expect((d.vm as Runner).thread?.contexts[0]?.waitState).toEqual({ kind: 'ab' });
     d.press('a');
     d.tick(); // the VM resumes on the following tick
-    expect((d.vm as Runner).thread?.contexts[0]).toBeNull();
+    expect((d.vm as Runner).thread).toBeNull();
   });
 
   it('wait_button: a d-pad press turns the player and ends the wait', () => {

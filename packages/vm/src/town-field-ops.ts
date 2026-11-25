@@ -56,7 +56,7 @@ export function townFieldHandlers(r: Runner): Record<string, Handler> {
     /** The binoculars' task; the script waits. */
     use_vista_lighthouse_binoculars: (_t, c) => {
       r.field.vistaBinoculars();
-      return r.pause(c, () => r.field.vistaBinocularsDone());
+      return r.pause(c, () => r.field.vistaBinocularsDone(), { kind: 'vista-binoculars' });
     },
   };
 }

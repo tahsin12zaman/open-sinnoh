@@ -70,12 +70,12 @@ export function safariHandlers(r: Runner): Record<string, Handler> {
       if (location < 0 || location > 2) throw new Error(`move_great_marsh_tram: location ${location}`);
       if (type !== GREAT_MARSH_TRAM.call && type !== GREAT_MARSH_TRAM.ride) throw new Error(`move_great_marsh_tram: movement ${type}`);
       r.field.moveGreatMarshTram(location, type === GREAT_MARSH_TRAM.call ? 'call' : 'ride');
-      return r.pause(c, () => r.field.greatMarshTramDone());
+      return r.pause(c, () => r.field.greatMarshTramDone(), { kind: 'marsh-tram' });
     },
     /** ScrCmd_StartGreatMarshLookout: the binoculars' five views of the marsh; the script waits. */
     start_great_marsh_lookout: (_t, c) => {
       r.field.greatMarshLookout();
-      return r.pause(c, () => r.field.greatMarshLookoutDone());
+      return r.pause(c, () => r.field.greatMarshLookoutDone(), { kind: 'marsh-lookout' });
     },
   };
 }

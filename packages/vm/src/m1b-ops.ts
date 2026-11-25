@@ -173,7 +173,7 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
     play_hm_cut_in: (t, c, a) => {
       mon(t, a[0]);
       r.field.hmCutIn(val(t, a[0]));
-      return r.pause(c, () => r.field.hmCutInDone());
+      return r.pause(c, () => r.field.hmCutInDone(), { kind: 'hm-cut-in' });
     },
     find_party_slot_with_move: (t, _c, a) => {
       const move = val(t, a[1]);
@@ -188,7 +188,7 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
     move_camera: (t, _c, a) => (r.field.moveCamera(val(t, a[0]), val(t, a[1]), val(t, a[2])), 'continue'),
     shake_object: (t, c, a) => {
       r.field.shakeObject(val(t, a[0]), val(t, a[1]), val(t, a[2]), val(t, a[3]), val(t, a[4]));
-      return r.pause(c, () => r.field.shakeObjectDone());
+      return r.pause(c, () => r.field.shakeObjectDone(), { kind: 'shake-object' });
     },
     // Decomp Task_FlickerMapObject, one call per tick: apply the hidden flag; every `delay + 1` calls flip
     // it, and stop on the flip after `times` flips.
@@ -216,7 +216,7 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
     // Decomp PlatformLift_Trigger starts the ride with FieldTask_InitCall: the script waits for it.
     trigger_platform_lift: (_t, c) => {
       r.field.triggerPlatformLift();
-      return r.pause(c, () => r.field.platformLiftDone());
+      return r.pause(c, () => r.field.platformLiftDone(), { kind: 'platform-lift' });
     },
     hide_object: visible(false),
     show_object: visible(true),
@@ -278,7 +278,7 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
       const dir = ELEVATOR_DIRS[val(t, a[0])];
       if (!dir) throw new Error(`bad elevator direction ${val(t, a[0])}`);
       r.field.elevator(dir, val(t, a[1]) & 0xff);
-      return r.pause(c, () => r.field.elevatorDone());
+      return r.pause(c, () => r.field.elevatorDone(), { kind: 'elevator' });
     },
     get_overworld_weather: (t, _c, a) => {
       const w = r.registries.weathers.get(r.state.weather);

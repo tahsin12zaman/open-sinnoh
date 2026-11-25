@@ -102,7 +102,7 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
       const state = r.int(a[0]);
       if (state === WATERING.start) {
         r.field.startWatering();
-        return r.pause(c, () => r.field.wateringDone());
+        return r.pause(c, () => r.field.wateringDone(), { kind: 'watering' });
       }
       if (state !== WATERING.end) throw new Error(`set_berry_watering_state: state ${state}`);
       r.field.endWatering();

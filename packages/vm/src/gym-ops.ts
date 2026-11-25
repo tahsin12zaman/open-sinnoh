@@ -14,7 +14,7 @@ export function gymHandlers(r: Runner): Record<string, Handler> {
       r.field.pressSunyshoreGymButton(r.int(a[0]));
       const sound = r.namedSequence('SEQ_SE_DP_GAGAGA');
       if (sound) r.audio.playSe(sound);
-      return r.pause(c, () => r.field.sunyshoreGymButtonDone());
+      return r.pause(c, () => r.field.sunyshoreGymButtonDone(), { kind: 'sunyshore-button' });
     },
     /** ScrCmd_InitPersistedMapFeaturesFor*Gym (from onTransition): select and clear the saved slot. */
     init_persisted_map_features_for_eterna_gym: () => (r.field.initMapFeatures('eterna-gym'), 'continue'),
@@ -35,11 +35,11 @@ export function gymHandlers(r: Runner): Record<string, Handler> {
       const exit = (['up', 'down', 'left', 'right'] as const)[r.int(a[1])];
       if (!exit) throw new Error(`play_boat_cutscene: exit direction ${r.int(a[1])}`);
       r.field.playBoatCutscene(r.int(a[0]), exit, r.source('zones', r.val(t, a[2]))!, r.val(t, a[3]), r.val(t, a[4]));
-      return r.pause(c, () => r.field.boatCutsceneDone());
+      return r.pause(c, () => r.field.boatCutsceneDone(), { kind: 'boat-cutscene' });
     },
     press_pastoria_gym_button: (_t, c) => {
       r.field.pressPastoriaGymButton();
-      return r.pause(c, () => r.field.pastoriaGymButtonDone());
+      return r.pause(c, () => r.field.pastoriaGymButtonDone(), { kind: 'pastoria-button' });
     },
 
     /**

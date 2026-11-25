@@ -188,7 +188,7 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
         t.turnAfterHealing = opposite[r.state.player.facing];
       }
       r.field.healAnimation(r.val(t, a[0]));
-      return r.pause(c, () => r.field.healAnimationDone());
+      return r.pause(c, () => r.field.healAnimationDone(), { kind: 'heal-animation' });
     },
   };
 }

@@ -22,7 +22,7 @@ export function hofHandlers(r: Runner): Record<string, Handler> {
     // Decomp ScrCmd_PlayHallOfFameHealingAnimation → FieldSystem_PlayHealingAnimation_HallOfFame.
     play_hall_of_fame_healing_animation: (t, c, a) => {
       r.field.healAnimation(r.val(t, a[0]), 'hall-of-fame');
-      return r.pause(c, () => r.field.healAnimationDone());
+      return r.pause(c, () => r.field.healAnimationDone(), { kind: 'heal-animation' });
     },
   };
 }
