@@ -191,7 +191,11 @@ export function m6Handlers(r: Runner): Record<string, Handler> {
       });
       seen.forEach((n, i) => (t.slots[i + 1] = plainMarkup(r.speciesName(n))));
       const p = r.showMessage(t, r.bankText(bank.value, r.int(a[0]) + seen.length), r.textSpeed());
-      return r.pause(c, () => p.done);
+      return r.pause(
+        c,
+        () => p.done,
+        { kind: 'message' },
+      );
     },
   };
 }

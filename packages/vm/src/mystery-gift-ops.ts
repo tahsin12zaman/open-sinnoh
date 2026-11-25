@@ -95,7 +95,11 @@ export function mysteryGiftHandlers(r: Runner): Record<string, Handler> {
     /** Decomp ScrCmd_MessageFromBank: message `id` of bank `bank` (both var or value), printed at the text speed. */
     message_from_bank: (t, c, a) => {
       const p = r.showMessage(t, r.bankText(r.val(t, a[0]), r.val(t, a[1])), r.textSpeed());
-      return r.pause(c, () => p.done);
+      return r.pause(
+        c,
+        () => p.done,
+        { kind: 'message' },
+      );
     },
     message_from_bank_instant: (t, _c, a) => (r.showMessage(t, r.bankText(r.val(t, a[0]), r.val(t, a[1])), TEXT_SPEED.instant), 'continue'),
 

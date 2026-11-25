@@ -51,7 +51,11 @@ export function townFieldHandlers(r: Runner): Record<string, Handler> {
       if (!rec) throw new Error(`unknown text ${id}`);
       const printer = new TextPrinter(toPrintOps(rec.text, t.slots), { speed: r.textSpeed(), canSpeedUp: false });
       r.ui.message = { printer, font: 'unown' };
-      return r.pause(c, () => printer.done);
+      return r.pause(
+        c,
+        () => printer.done,
+        { kind: 'message' },
+      );
     },
     /** The binoculars' task; the script waits. */
     use_vista_lighthouse_binoculars: (_t, c) => {

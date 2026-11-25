@@ -72,7 +72,11 @@ export function undergroundHandlers(r: Runner): Record<string, Handler> {
       // UndergroundTextPrinter_SetPlayerNameIndex0: the player's name in slot 0.
       t.slots[0] = plainMarkup(r.state.names.player);
       const p = r.showMessage(t, npcText(r.val(t, a[0])), r.textSpeed());
-      return r.pause(c, () => p.done);
+      return r.pause(
+        c,
+        () => p.done,
+        { kind: 'message' },
+      );
     },
     close_underground_npc_message: () => ((r.ui.message = null), 'continue'),
     /** CommPlayer_SetDir: in a solo Underground the one player is the player (Roark's intro turns them east). */
