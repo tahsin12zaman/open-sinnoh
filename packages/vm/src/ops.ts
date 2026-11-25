@@ -260,10 +260,9 @@ export function m1aHandlers(r: Runner): Record<string, Handler> {
       // The world places the animation (FieldHost.destroyObstacle); the task writes TRUE to the var when it ends.
       r.setVar(t, v, 0);
       r.field.destroyObstacle(kind);
-      t.tasks.push(() => {
-        if (!r.field.destroyObstacleDone()) return false;
-        r.setVar(t, v, 1);
-        return true;
+      t.tasks.push({
+        kind: 'destroy-obstacle',
+        variable: v,
       });
       return 'yield';
     },

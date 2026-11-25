@@ -120,7 +120,8 @@ export type RuntimeWait =
       soundAt: number;
       total: number;
       sound: Id | null;
-    };
+    }
+  | { kind: 'contest-flash' };
 
 export interface Context {
   label: Id;
@@ -133,6 +134,16 @@ export interface Context {
   waitState: RuntimeWait | null;
   cmp: number;
 }
+
+export type RuntimeThreadTask =
+  | {
+      kind: 'contest-flash';
+      shutter: Id | null;
+    }
+  | {
+      kind: 'destroy-obstacle';
+      variable: Id;
+    };
 
 export interface Thread {
   /** The label the thread started at (trainer scripts derive the trainer id from it). */
@@ -153,7 +164,7 @@ export interface Thread {
   /** Player state bits requested by set_player_state (decomp PlayerAvatar request bits). */
   playerStateRequest: number;
   /** Tick hooks of background tasks that write a var when done (decomp SysTasks such as obstacle animations). */
-  tasks: (() => boolean)[];
+  tasks: RuntimeThreadTask[];
   /** The scripted menu's result var (decomp ctx->data[0] of the menu commands). */
   menuVar: Id | null;
   /** Decomp FieldSystem_ShowStartMenu: the start menu opens when this script ends. */
@@ -179,6 +190,11 @@ export interface RunnerOpState {
   sideLearned?: boolean;
   sideMovePick?: number | null;
   sideTrade: number | null;
+  contestFlash: {
+    delays: number[];
+    count: number;
+    frame: number;
+  } | null;
 }
 
 export type Result = 'continue' | 'yield';
@@ -203,6 +219,7 @@ export class Runner implements ScriptRunner {
   readonly backgroundTasks = new Set<() => void>();
   readonly opState: RunnerOpState = {
     sideTrade: null,
+    contestFlash: null,
   };
   lastTouch: InputFrame['touch'] = null;
   /** This tick's input, for commands that read the keys directly (decomp gSystem.heldKeys: `check_ab_press`). */
@@ -405,7 +422,9 @@ export class Runner implements ScriptRunner {
       this.frontier?.step(input);
       const t = this.thread;
       this.runThread(t, input);
-      t.tasks = t.tasks.filter((task) => !task());
+      t.tasks = t.tasks.filter(
+        (task) => !this.stepRuntimeTask(t, task),
+      );
       if (t.contexts.every((c) => !c)) {
         if (t.turnAfterHealing) this.field.turnPlayer(t.turnAfterHealing);
         this.thread = null;
@@ -431,6 +450,56 @@ export class Runner implements ScriptRunner {
       for (let i = 0; i < 2; i++) if (printer.subStep(ab)) this.playFieldSe(SE_CONFIRM);
     }
     this.lastTouch = input.touch;
+  }
+
+  private stepRuntimeTask(
+    thread: Thread,
+    task: RuntimeThreadTask,
+  ): boolean {
+    switch (task.kind) {
+      case 'contest-flash': {
+        const flash = this.opState.contestFlash;
+
+        if (!flash) {
+          throw new Error(
+            'contest flash task has no runtime state',
+          );
+        }
+
+        flash.frame++;
+
+        if (
+          flash.frame <=
+          flash.delays[flash.count]!
+        ) {
+          return false;
+        }
+
+        this.field.cameraFlash();
+
+        if (task.shutter) {
+          this.audio.playSe(task.shutter);
+        }
+
+        flash.count++;
+        flash.frame = 0;
+
+        if (flash.count < flash.delays.length) {
+          return false;
+        }
+
+        this.opState.contestFlash = null;
+        return true;
+      }
+
+      case 'destroy-obstacle':
+        if (!this.field.destroyObstacleDone()) {
+          return false;
+        }
+
+        this.setVar(thread, task.variable, 1);
+        return true;
+    }
   }
 
   view(): ScriptView {
@@ -757,6 +826,8 @@ export class Runner implements ScriptRunner {
           brightness: 0,
         });
         return false;
+      case 'contest-flash':
+        return this.opState.contestFlash === null;
       case 'starter-choice': {
         const panel = this.ui.panel;
         if (panel.kind !== 'choice') throw new Error('starter-choice runtime wait has no choice panel');

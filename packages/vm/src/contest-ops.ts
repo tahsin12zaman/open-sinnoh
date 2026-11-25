@@ -56,8 +56,6 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
   const practice = (s: ContestSession) => s.mode === 'practice';
   /** The pick of the contest party menu until `get_contest_party_menu_result` reads it. */
   /** The camera flash task (decomp ContestCameraFlashTask), while it runs. */
-  let flash: { delays: readonly number[]; count: number; frame: number } | null = null;
-  const seq = (n: number) => r.source('sequences', n, false);
 
   /** Faces the player per step, as a MapObject animation of one-frame faces and delays, then calls `then`. */
   const spin = (steps: [number, number][]) => {
@@ -172,25 +170,51 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
     run_contest_application: (_t, c) => (session('run_contest_application'), r.openApp(c, { app: 'contest' }, () => {})),
     /** Contest_StartCameraFlashTask: the rank's (variant's) delays, a flash and the shutter after each. */
     start_contest_camera_flash_task: (t, _c, a) => {
-      const s = session('start_contest_camera_flash_task');
-      if (flash) throw new Error('start_contest_camera_flash_task: a flash task runs already');
-      const e = entrant('start_contest_camera_flash_task', val(t, a[0]));
-      flash = { delays: FLASH_DELAYS[s.rank]![e.aiLevel & 1]!, count: 0, frame: 0 };
-      t.tasks.push(() => {
-        const f = flash!;
-        if (++f.frame <= f.delays[f.count]!) return false;
-        r.field.cameraFlash();
-        const se = seq(SE_SHUTTER);
-        if (se) r.audio.playSe(se);
-        f.count++;
-        f.frame = 0;
-        if (f.count < f.delays.length) return false;
-        flash = null;
-        return true;
+      const sessionState = session(
+        'start_contest_camera_flash_task',
+      );
+
+      if (r.opState.contestFlash) {
+        throw new Error(
+          'start_contest_camera_flash_task: a flash task runs already',
+        );
+      }
+
+      const entrantState = entrant(
+        'start_contest_camera_flash_task',
+        val(t, a[0]),
+      );
+
+      r.opState.contestFlash = {
+        delays: [
+          ...FLASH_DELAYS[sessionState.rank]![
+            entrantState.aiLevel & 1
+          ]!,
+        ],
+        count: 0,
+        frame: 0,
+      };
+
+      t.tasks.push({
+        kind: 'contest-flash',
+        shutter:
+          r.source(
+            'sequences',
+            SE_SHUTTER,
+            false,
+          ) ?? null,
       });
+
       return 'continue';
     },
-    wait_for_contest_camera_flash_task: (_t, c) => r.pause(c, () => flash === null),
+
+    wait_for_contest_camera_flash_task: (_t, c) =>
+      r.pause(
+        c,
+        () => r.opState.contestFlash === null,
+        { kind: 'contest-flash' },
+      ),
+
     /** Offline the comm syncs pass at once (Contest_StartCommSync returns, Contest_IsSyncState is TRUE). */
     start_contest_comm_sync: () => 'continue',
     wait_for_comm_sync_state: () => 'continue',
