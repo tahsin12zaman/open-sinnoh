@@ -186,6 +186,61 @@ test:WaitABTime::
     expect((d.vm as Runner).thread).toBeNull();
   });
 
+  it('do_dw_warp keeps its timeline in a serializable descriptor', () => {
+    const d = run(`
+test:DWWarp::
+  do_dw_warp
+  end
+`);
+
+    d.vm.start({
+      label: 'test:DWWarp',
+      zone: 'fixture:TOWN',
+      source: 'test',
+    });
+
+    d.tick();
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0]?.waitState,
+    ).toEqual({
+      kind: 'dw-warp',
+      frame: 0,
+      soundAt: 31,
+      total: 123,
+      sound: null,
+    });
+
+    d.tick();
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0]?.waitState,
+    ).toMatchObject({
+      kind: 'dw-warp',
+      frame: 1,
+    });
+
+    for (let frame = 1; frame < 123; frame++) {
+      d.tick();
+    }
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0],
+    ).toMatchObject({
+      state: 'running',
+      waitState: null,
+    });
+
+    d.tick();
+    expect((d.vm as Runner).thread).toBeNull();
+
+    expect(
+      d.field.calls.filter(
+        (call) => call.startsWith('setStoryScene'),
+      ),
+    ).toHaveLength(124);
+  });
+
   it('wait_button: a d-pad press turns the player and ends the wait', () => {
     const d = driver();
     d.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });

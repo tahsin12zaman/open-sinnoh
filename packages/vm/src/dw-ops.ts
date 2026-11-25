@@ -29,21 +29,32 @@ export function dwHandlers(r: Runner): Record<string, Handler> {
      * with its sound, fade out). Its standalone scene replaces the field, including the field's held fade.
      */
     do_dw_warp: (_t, c) => {
-      let frame = 0;
-      const present = () => r.field.setStoryScene({ kind: 'dw-warp', phase: 'warp', tick: frame, actors: [], brightness: 0 });
-      present();
       const sound = r.namedSequence(DW_WARP_SOUND);
-      return r.pause(c, () => {
-        if (frame === DW_WARP.fadeIn + DW_WARP.sound) {
-          if (sound) r.audio.playSe(sound);
-        }
-        if (++frame >= DW_WARP.fadeIn + DW_WARP.loop + DW_WARP.fadeOut) {
-          r.field.setStoryScene(null);
-          return true;
-        }
-        present();
-        return false;
+      const soundAt = DW_WARP.fadeIn + DW_WARP.sound;
+      const total =
+        DW_WARP.fadeIn +
+        DW_WARP.loop +
+        DW_WARP.fadeOut;
+
+      r.field.setStoryScene({
+        kind: 'dw-warp',
+        phase: 'warp',
+        tick: 0,
+        actors: [],
+        brightness: 0,
       });
+
+      return r.pause(
+        c,
+        () => false,
+        {
+          kind: 'dw-warp',
+          frame: 0,
+          soundAt,
+          total,
+          sound: sound ?? null,
+        },
+      );
     },
     get_player3_d_pos: (t, _c, a) => {
       const p = r.field.player();

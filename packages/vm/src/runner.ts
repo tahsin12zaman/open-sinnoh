@@ -113,7 +113,14 @@ export type RuntimeWait =
   | { kind: 'audio-cry' }
   | { kind: 'audio-fanfare' }
   | { kind: 'audio-fade' }
-  | { kind: 'ab-time'; left: number };
+  | { kind: 'ab-time'; left: number }
+  | {
+      kind: 'dw-warp';
+      frame: number;
+      soundAt: number;
+      total: number;
+      sound: Id | null;
+    };
 
 export interface Context {
   label: Id;
@@ -708,6 +715,26 @@ export class Runner implements ScriptRunner {
         return has(input.pressed, 'a') ||
           has(input.pressed, 'b') ||
           --wait.left <= 0;
+      case 'dw-warp':
+        if (
+          wait.frame === wait.soundAt &&
+          wait.sound
+        ) {
+          this.audio.playSe(wait.sound);
+        }
+        wait.frame++;
+        if (wait.frame >= wait.total) {
+          this.field.setStoryScene(null);
+          return true;
+        }
+        this.field.setStoryScene({
+          kind: 'dw-warp',
+          phase: 'warp',
+          tick: wait.frame,
+          actors: [],
+          brightness: 0,
+        });
+        return false;
       case 'starter-choice': {
         const panel = this.ui.panel;
         if (panel.kind !== 'choice') throw new Error('starter-choice runtime wait has no choice panel');
