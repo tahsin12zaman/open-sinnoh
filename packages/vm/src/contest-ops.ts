@@ -34,9 +34,6 @@ const DIRS: Facing[] = ['up', 'down', 'left', 'right'];
  */
 const SPIN_BEFORE: [number, number][] = [[1, 2], [2, 2], [0, 2], [3, 2], [1, 1], [2, 1], [0, 1], [3, 1], [1, 0], [2, 0], [0, 0], [3, 0], [1, 0], [2, 0], [0, 0], [3, 0]];
 const SPIN_AFTER: [number, number][] = [[1, 0], [2, 0], [0, 0], [3, 0], [1, 0], [2, 0], [0, 0], [3, 0], [1, 1], [2, 1], [0, 1], [3, 1], [1, 2], [2, 3], [0, 4], [3, 5], [1, 0]];
-/** The player's local id. */
-const PLAYER = 0xff;
-
 export function contestHandlers(r: Runner): Record<string, Handler> {
   const val = (t: Thread, a: Arg | undefined) => r.val(t, a);
   const dest = (t: Thread, a: Arg | undefined, v: number) => r.setVar(t, r.ref(a, 'var'), v);
@@ -57,17 +54,17 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
   /** The pick of the contest party menu until `get_contest_party_menu_result` reads it. */
   /** The camera flash task (decomp ContestCameraFlashTask), while it runs. */
 
-  /** Faces the player per step, as a MapObject animation of one-frame faces and delays, then calls `then`. */
-  const spin = (steps: [number, number][]) => {
-    const ticks: (Facing | null)[] = steps.flatMap(([d, n]) => [DIRS[d]!, ...Array.from({ length: n }, () => null)]);
-    let i = 0;
-    return () => {
-      if (i >= ticks.length) return true;
-      const f = ticks[i++];
-      if (f) r.field.faceObject(PLAYER, f);
-      return false;
-    };
-  };
+  /** Expands each facing and delay pair into one data-only tick stream. */
+  const spinTicks = (
+    steps: [number, number][],
+  ): (Facing | null)[] =>
+    steps.flatMap(([direction, delay]) => [
+      DIRS[direction]!,
+      ...Array.from(
+        { length: delay },
+        () => null,
+      ),
+    ]);
 
   return {
     /** ScrCmd_NewContest (offline): the contest's session, seeded from one draw of the game's main stream. */
@@ -223,18 +220,18 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
     /** LockTextSpeed: the field's message printer sets these render flags again for every message (field_message.c), so nothing outlasts it here. */
     lock_text_speed: () => 'continue',
     /** ScrCmd_ChangeIntoContestAttire (ov5_021E0DE0): the spin, the redraw in the contest attire, the spin back. */
-    change_into_contest_attire: (_t, c) => {
-      const before = spin(SPIN_BEFORE);
-      let after: (() => boolean) | null = null;
-      return r.pause(c, () => {
-        if (!after) {
-          if (!before()) return false;
-          r.field.setPlayerAvatar('contest');
-          after = spin(SPIN_AFTER);
-        }
-        return after();
-      });
-    },
+    change_into_contest_attire: (_t, c) =>
+      r.pause(
+        c,
+        () => false,
+        {
+          kind: 'contest-attire',
+          before: spinTicks(SPIN_BEFORE),
+          after: spinTicks(SPIN_AFTER),
+          phase: 'before',
+          index: 0,
+        },
+      ),
     /** ScrCmd_OpenPartyMenuForContest: the party in contest mode (rank Normal for a link's default rank). */
     open_party_menu_for_contest: (t, c, a) => {
       const rank = val(t, a[3]) ? 0 : val(t, a[1]);

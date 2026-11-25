@@ -12,54 +12,6 @@ const SEQ_CLIMAX09 = 1749;
 const SEQ_FW089 = 1628;
 const FX = 4096;
 /** The delays around the nonzero mode's shake, in callbacks. */
-const DELAY = 16;
-
-/**
- * ov6_0223FE9C: a cycle is four callbacks over a one-step interpolation (+amplitude, back to 0, −amplitude,
- * back to 0); after `cycles` cycles the camera is restored, then the shake reports done. Amplitude in fx32.
- */
-class Shake {
-  state = 0;
-  private count = 0;
-  constructor(
-    public delta: number,
-    public cycles: number,
-  ) {}
-
-  /** One callback; returns the camera's x offset (world units). */
-  step(): number {
-    // ov6_0223FD18 over one step: the full delta at count 1, nothing at 0.
-    const at = () => this.delta * this.count;
-    switch (this.state) {
-      case 0:
-        this.count++;
-        this.state = 1;
-        return at() / FX;
-      case 1:
-        this.count--;
-        this.state = 2;
-        return at() / FX;
-      case 2:
-        this.count++;
-        this.state = 3;
-        return -at() / FX;
-      case 3:
-        this.count--;
-        if (--this.cycles > 0) this.state = 0;
-        else this.state = 4;
-        return -at() / FX;
-      case 4:
-        this.state = 5;
-        return 0;
-      default:
-        return 0;
-    }
-  }
-
-  done(): boolean {
-    return this.state === 5;
-  }
-}
 
 export function sceneHandlers(r: Runner): Record<string, Handler> {
   const seq = (n: number): Id | null => {
@@ -140,66 +92,33 @@ export function sceneHandlers(r: Runner): Record<string, Handler> {
      */
     scr_cmd_29f: (t, c, a) => {
       const mode = r.val(t, a[0]);
-      const shake = mode === 0 ? new Shake(2 * FX, 16) : new Shake(4 * FX, 24);
+      const explosion =
+        mode === 0 ? null : seq(SEQ_FW089);
+
       se(SEQ_CLIMAX09);
-      if (mode === 0) {
-        return r.pause(c, () => {
-          // ov6_0223E33C: the shake until done, then a callback that frees it.
-          if (shake.done()) return true;
-          r.field.shakeCamera(shake.step());
-          return false;
-        });
-      }
-      let state = 0;
-      let delay = 0;
-      let cycles = shake.cycles;
-      return r.pause(c, () => {
-        switch (state) {
-          case 0:
-            r.audio.fadeOutBgm(0, 1);
-            state = 1;
-            return false;
-          case 1:
-            if (!r.audio.fadeActive()) {
-              state = 2;
-              delay = DELAY;
-            }
-            return false;
-          case 2:
-            if (--delay <= 0) {
-              state = 3;
-              se(SEQ_FW089);
-            }
-            return false;
-          case 3: {
-            r.field.shakeCamera(shake.step());
-            // ov6_0223E3D8: when a cycle ends the amplitude loses FX_Div(amplitude, 8).
-            if (shake.cycles !== cycles) {
-              cycles = shake.cycles;
-              shake.delta -= Math.trunc(shake.delta / 8);
-            }
-            if (shake.done()) {
-              const fw = seq(SEQ_FW089);
-              if (fw) r.audio.stopSe(fw);
-              state = 4;
-              delay = DELAY;
-            }
-            return false;
-          }
-          case 4:
-            if (--delay <= 0) state = 5;
-            return false;
-          case 5:
-            r.audio.fadeInBgm(DELAY);
-            state = 6;
-            return false;
-          case 6:
-            if (!r.audio.fadeActive()) state = 7;
-            return false;
-          default:
-            return true;
-        }
-      });
+
+      return r.pause(
+        c,
+        () => false,
+        {
+          kind: 'scene-shake',
+          phase:
+            mode === 0
+              ? 'shake'
+              : 'fade-out-start',
+          shakeState: 0,
+          count: 0,
+          delta:
+            mode === 0
+              ? 2 * FX
+              : 4 * FX,
+          cycles: mode === 0 ? 16 : 24,
+          previousCycles:
+            mode === 0 ? 16 : 24,
+          delay: 0,
+          explosion,
+        },
+      );
     },
   };
 }

@@ -145,6 +145,33 @@ export type RuntimeWait =
       delay: number;
       hidden: boolean;
       timer: number;
+    }
+  | {
+      kind: 'contest-attire';
+      before: (Facing | null)[];
+      after: (Facing | null)[];
+      phase: 'before' | 'after';
+      index: number;
+    }
+  | {
+      kind: 'scene-shake';
+      phase:
+        | 'shake'
+        | 'fade-out-start'
+        | 'fade-out'
+        | 'delay-before'
+        | 'explosion'
+        | 'delay-after'
+        | 'fade-in-start'
+        | 'fade-in'
+        | 'done';
+      shakeState: number;
+      count: number;
+      delta: number;
+      cycles: number;
+      previousCycles: number;
+      delay: number;
+      explosion: Id | null;
     };
 
 export interface Context {
@@ -908,6 +935,172 @@ export class Runner implements ScriptRunner {
         wait.hidden = !wait.hidden;
         wait.timer = 0;
         return wait.times-- === 0;
+
+      case 'contest-attire': {
+        const ticks =
+          wait.phase === 'before'
+            ? wait.before
+            : wait.after;
+
+        if (wait.index >= ticks.length) {
+          if (wait.phase === 'after') return true;
+
+          this.field.setPlayerAvatar('contest');
+          wait.phase = 'after';
+          wait.index = 0;
+        }
+
+        const facing = wait.after[wait.index];
+
+        if (wait.phase === 'before') {
+          const beforeFacing =
+            wait.before[wait.index];
+
+          wait.index++;
+
+          if (beforeFacing) {
+            this.field.faceObject(
+              0xff,
+              beforeFacing,
+            );
+          }
+
+          return false;
+        }
+
+        wait.index++;
+
+        if (facing) {
+          this.field.faceObject(0xff, facing);
+        }
+
+        return false;
+      }
+
+      case 'scene-shake': {
+        const stepShake = () => {
+          const at = () =>
+            wait.delta * wait.count;
+
+          switch (wait.shakeState) {
+            case 0:
+              wait.count++;
+              wait.shakeState = 1;
+              return at() / 4096;
+            case 1:
+              wait.count--;
+              wait.shakeState = 2;
+              return at() / 4096;
+            case 2:
+              wait.count++;
+              wait.shakeState = 3;
+              return -at() / 4096;
+            case 3:
+              wait.count--;
+              wait.cycles--;
+
+              wait.shakeState =
+                wait.cycles > 0 ? 0 : 4;
+
+              return -at() / 4096;
+            case 4:
+              wait.shakeState = 5;
+              return 0;
+            default:
+              return 0;
+          }
+        };
+
+        switch (wait.phase) {
+          case 'shake':
+            if (wait.shakeState === 5) {
+              return true;
+            }
+
+            this.field.shakeCamera(stepShake());
+            return false;
+
+          case 'fade-out-start':
+            this.audio.fadeOutBgm(0, 1);
+            wait.phase = 'fade-out';
+            return false;
+
+          case 'fade-out':
+            if (!this.audio.fadeActive()) {
+              wait.phase = 'delay-before';
+              wait.delay = 16;
+            }
+
+            return false;
+
+          case 'delay-before':
+            if (--wait.delay <= 0) {
+              wait.phase = 'explosion';
+
+              if (wait.explosion) {
+                this.audio.playSe(
+                  wait.explosion,
+                );
+              }
+            }
+
+            return false;
+
+          case 'explosion':
+            this.field.shakeCamera(stepShake());
+
+            if (
+              wait.cycles !==
+              wait.previousCycles
+            ) {
+              wait.previousCycles =
+                wait.cycles;
+
+              wait.delta -= Math.trunc(
+                wait.delta / 8,
+              );
+            }
+
+            if (wait.shakeState === 5) {
+              if (wait.explosion) {
+                this.audio.stopSe(
+                  wait.explosion,
+                );
+              }
+
+              wait.phase = 'delay-after';
+              wait.delay = 16;
+            }
+
+            return false;
+
+          case 'delay-after':
+            if (--wait.delay <= 0) {
+              wait.phase = 'fade-in-start';
+            }
+
+            return false;
+
+          case 'fade-in-start':
+            this.audio.fadeInBgm(16);
+            wait.phase = 'fade-in';
+            return false;
+
+          case 'fade-in':
+            if (!this.audio.fadeActive()) {
+              wait.phase = 'done';
+            }
+
+            return false;
+
+          case 'done':
+            return true;
+          default:
+            throw new Error(
+              'unknown scene-shake phase',
+            );
+        }
+      }
 
       case 'audio-se':
         return !this.audio.sePlaying(wait.sequence);
