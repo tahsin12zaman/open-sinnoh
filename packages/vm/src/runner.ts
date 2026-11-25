@@ -153,6 +153,7 @@ export type RuntimeWait =
       phase: 'before' | 'after';
       index: number;
     }
+  | { kind: 'battle' }
   | {
       kind: 'scene-shake';
       phase:
@@ -206,6 +207,9 @@ export interface Thread {
   slots: (string | undefined)[];
   lastTalked: number | undefined;
   chosenStarter: number | null;
+  /** Outcome of the most recently completed scripted battle. */
+  battleOutcome:
+    import('@opensinnoh/contracts').BattleOutcome | null;
   /** Loaded prop animations by tag (decomp ANIMATION_TAG_*): a door at a tile, or the PC (load_pc_animation). */
   doors: Map<number, { x: number; z: number } | 'pc'>;
   immediate: boolean;
@@ -721,6 +725,7 @@ export class Runner implements ScriptRunner {
       slots: [],
       lastTalked: start.lastTalked,
       chosenStarter: null,
+      battleOutcome: null,
       doors: new Map(),
       immediate,
     };
@@ -1100,6 +1105,15 @@ export class Runner implements ScriptRunner {
               'unknown scene-shake phase',
             );
         }
+      }
+
+      case 'battle': {
+        const result = this.field.battleDone();
+
+        if (!result) return false;
+
+        t.battleOutcome = result.outcome;
+        return true;
       }
 
       case 'audio-se':

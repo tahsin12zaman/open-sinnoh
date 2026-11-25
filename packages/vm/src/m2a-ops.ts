@@ -21,27 +21,28 @@ const VAR_PLAYER_STARTER = 0x4030;
 const VAR_PARTNER_TRAINER_ID = 0x403f;
 
 /** The battle outcome per script (decomp SCRIPT_MANAGER_BATTLE_RESULT). Not saved: saves happen between scripts. */
-const outcomes = new WeakMap<Thread, BattleOutcome>();
-
 /**
  * Starts the battle and waits for its end (the game runs it in battle mode, and the field's return), keeping its
  * outcome for the script.
  */
 export function scriptBattle(r: Runner, t: Thread, c: Context, request: BattleRequest): Result {
   r.field.startBattle(request);
-  return r.pause(c, () => {
-    const result = r.field.battleDone();
-    if (!result) return false;
-    outcomes.set(t, result.outcome);
-    return true;
-  });
+  return r.pause(
+    c,
+    () => false,
+    { kind: 'battle' },
+  );
 }
 
 /** The outcome of the script's last battle (decomp SCRIPT_MANAGER_BATTLE_RESULT); none yet is a script error. */
 export function battleOutcome(t: Thread, op: string): BattleOutcome {
-  const o = outcomes.get(t);
-  if (!o) throw new Error(`${op}: no battle has run in this script`);
-  return o;
+  if (!t.battleOutcome) {
+    throw new Error(
+      `${op}: no battle has run in this script`,
+    );
+  }
+
+  return t.battleOutcome;
 }
 
 export function m2aHandlers(r: Runner): Record<string, Handler> {
