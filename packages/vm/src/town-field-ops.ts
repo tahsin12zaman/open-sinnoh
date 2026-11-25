@@ -8,7 +8,6 @@ import type { Handler, Runner } from './runner.ts';
 import { TextPrinter, toPrintOps } from '@opensinnoh/text';
 
 /** VS_SEEKER_USE_RESULT_NO_BATTERY; the battery's full charge (VS_SEEKER_MAX_BATTERY). */
-const NO_BATTERY = 1;
 const MAX_BATTERY = 100;
 /** SPECIES_GIRATINA: the Origin Forme (form 1) leaves no print (FootprintType_SpeciesHasPrint). */
 const SPECIES_GIRATINA = 487;
@@ -22,13 +21,21 @@ export function townFieldHandlers(r: Runner): Record<string, Handler> {
     start_vs_seeker: (t, c, a) => {
       const dest = r.ref(a[0], 'var');
       r.field.startVsSeeker();
-      return r.pause(c, () => {
-        const result = r.field.vsSeekerResult();
-        if (result === null) return false;
-        if (result === NO_BATTERY) t.slots[0] = String(MAX_BATTERY - readSystemVar(r.registries, r.state, FIELD_VARS.battery));
-        r.setVar(t, dest, result);
-        return true;
-      });
+      return r.pause(
+        c,
+        () => false,
+        {
+          kind: 'vs-seeker',
+          variable: dest,
+          missingCharge:
+            MAX_BATTERY -
+            readSystemVar(
+              r.registries,
+              r.state,
+              FIELD_VARS.battery,
+            ),
+        },
+      );
     },
     /** FootprintType_SpeciesHasPrint and FootprintType_GetTypeFromSpecies of a party Pokémon (eggs too, as on the DS). */
     get_party_mon_footprint_type: (t, _c, a) => {

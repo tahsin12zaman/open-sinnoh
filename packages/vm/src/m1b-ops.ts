@@ -143,12 +143,27 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
     };
   /** An HM traversal task (decomp FieldTask_StartUse*): the script waits until the world reports it done. */
   const hmTask =
-    (start: (slot: number) => void, done: () => boolean): Handler =>
+    (
+      start: (slot: number) => void,
+      task: 'surf' | 'waterfall' | 'rock-climb',
+    ): Handler =>
     (t, c, a) => {
       const s = val(t, a[0]);
-      if (!r.state.party[s]) throw new Error(`no party member ${s}`);
+
+      if (!r.state.party[s]) {
+        throw new Error(`no party member ${s}`);
+      }
+
       start(s);
-      return r.pause(c, done);
+
+      return r.pause(
+        c,
+        () => false,
+        {
+          kind: 'hm-traversal',
+          task,
+        },
+      );
     };
   // Decomp ScrCmd_0C3 / ScrCmd_0C4: the overworld weather becomes CLEAR now (after Flash and Defog).
   const clearWeather: Handler = () => (r.field.setWeather(r.source('weathers', WEATHER_CLEAR)!), 'continue');
@@ -162,9 +177,18 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
 
   return {
     // ---------------------------------------------------------------- HMs and field-move states
-    use_surf: hmTask((s) => r.field.surf(s), () => r.field.surfDone()),
-    use_waterfall: hmTask((s) => r.field.waterfall(s), () => r.field.waterfallDone()),
-    use_rock_climb: hmTask((s) => r.field.rockClimb(s), () => r.field.rockClimbDone()),
+    use_surf: hmTask(
+      (s) => r.field.surf(s),
+      'surf',
+    ),
+    use_waterfall: hmTask(
+      (s) => r.field.waterfall(s),
+      'waterfall',
+    ),
+    use_rock_climb: hmTask(
+      (s) => r.field.rockClimb(s),
+      'rock-climb',
+    ),
     do_strength_func: fieldMoveFunc(FIELD_MOVE_FLAGS.strength),
     do_flash_func: fieldMoveFunc(FIELD_MOVE_FLAGS.flash),
     do_defog_func: fieldMoveFunc(FIELD_MOVE_FLAGS.defog),
@@ -194,17 +218,18 @@ export function m1bHandlers(r: Runner): Record<string, Handler> {
     // it, and stop on the flip after `times` flips.
     flicker_object: (t, c, a) => {
       const localId = val(t, a[0]);
-      let times = val(t, a[1]);
-      const delay = val(t, a[2]);
-      let hidden = false;
-      let timer = 0;
-      return r.pause(c, () => {
-        r.field.setObjectVisible(localId, !hidden);
-        if (timer++ < delay) return false;
-        hidden = !hidden;
-        timer = 0;
-        return times-- === 0;
-      });
+      return r.pause(
+        c,
+        () => false,
+        {
+          kind: 'flicker-object',
+          localId,
+          times: val(t, a[1]),
+          delay: val(t, a[2]),
+          hidden: false,
+          timer: 0,
+        },
+      );
     },
     release_object: (t, _c, a) => (r.field.releaseObject(val(t, a[0])), 'continue'),
     force_bicycling: (_t, _c, a) => (r.field.forceBicycling(int(a[0]) !== 0), 'continue'),

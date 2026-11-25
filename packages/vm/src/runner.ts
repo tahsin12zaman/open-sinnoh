@@ -127,7 +127,25 @@ export type RuntimeWait =
       total: number;
       sound: Id | null;
     }
-  | { kind: 'contest-flash' };
+  | { kind: 'contest-flash' }
+  | { kind: 'ab-pad' }
+  | {
+      kind: 'vs-seeker';
+      variable: Id;
+      missingCharge: number;
+    }
+  | {
+      kind: 'hm-traversal';
+      task: 'surf' | 'waterfall' | 'rock-climb';
+    }
+  | {
+      kind: 'flicker-object';
+      localId: number;
+      times: number;
+      delay: number;
+      hidden: boolean;
+      timer: number;
+    };
 
 export interface Context {
   label: Id;
@@ -835,6 +853,62 @@ export class Runner implements ScriptRunner {
         return this.field.containmentUnitsDone();
       case 'vista-binoculars':
         return this.field.vistaBinocularsDone();
+      case 'ab-pad': {
+        const done = input.pressed.some(
+          (button) =>
+            button === 'a' ||
+            button === 'b' ||
+            button === 'up' ||
+            button === 'down' ||
+            button === 'left' ||
+            button === 'right',
+        );
+
+        if (done) this.ui.abWait = false;
+        return done;
+      }
+
+      case 'vs-seeker': {
+        const result = this.field.vsSeekerResult();
+
+        if (result === null) return false;
+
+        if (result === 1) {
+          t.slots[0] = String(wait.missingCharge);
+        }
+
+        this.setVar(t, wait.variable, result);
+        return true;
+      }
+
+      case 'hm-traversal':
+        switch (wait.task) {
+          case 'surf':
+            return this.field.surfDone();
+          case 'waterfall':
+            return this.field.waterfallDone();
+          case 'rock-climb':
+            return this.field.rockClimbDone();
+          default:
+            throw new Error(
+              `unknown HM traversal task: ${wait.task}`,
+            );
+        }
+
+      case 'flicker-object':
+        this.field.setObjectVisible(
+          wait.localId,
+          !wait.hidden,
+        );
+
+        if (wait.timer++ < wait.delay) {
+          return false;
+        }
+
+        wait.hidden = !wait.hidden;
+        wait.timer = 0;
+        return wait.times-- === 0;
+
       case 'audio-se':
         return !this.audio.sePlaying(wait.sequence);
       case 'audio-cry':

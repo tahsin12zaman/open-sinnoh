@@ -87,11 +87,11 @@ export function m5Handlers(r: Runner): Record<string, Handler> {
      */
     wait_ab_pad_press: (_t, c) => {
       r.ui.abWait = true;
-      return r.pause(c, (input) => {
-        const done = input.pressed.some((b) => b === 'a' || b === 'b' || b === 'up' || b === 'down' || b === 'left' || b === 'right');
-        if (done) r.ui.abWait = false;
-        return done;
-      });
+      return r.pause(
+        c,
+        () => false,
+        { kind: 'ab-pad' },
+      );
     },
 
     /**
