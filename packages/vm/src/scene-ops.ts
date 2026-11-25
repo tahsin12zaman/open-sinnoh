@@ -1,5 +1,4 @@
 import { newGameRecord } from '@opensinnoh/contracts';
-import { SpearFieldEffects } from './spear-field.ts';
 import { SpearPillarApplication } from './spear-app.ts';
 /**
  * Story scene commands (docs/research/story-scenes.md): `scr_cmd_29f`, the explosion's camera shake (decomp
@@ -72,12 +71,6 @@ export function sceneHandlers(r: Runner): Record<string, Handler> {
     const id = seq(n);
     if (id) r.audio.playSe(id);
   };
-  let effect: SpearFieldEffects | null = null;
-  let update: (() => void) | null = null;
-  const dispose = () => {
-    if (update) r.backgroundTasks.delete(update);
-    effect = null; update = null; r.field.setStoryScene(null);
-  };
   const data = () => {
     const d = newGameRecord(r.registries).spearPillar;
     if (!d) throw new Error('Spear Pillar scene assets missing');
@@ -88,17 +81,29 @@ export function sceneHandlers(r: Runner): Record<string, Handler> {
       const mode = r.int(a[0]);
       let result = 0;
       if (mode === 1 || mode === 6) {
-        if (!effect) throw new Error('Spear Pillar: poll without a live effect');
-        if (effect.done()) { result = 1; dispose(); }
+        if (!r.spearField) {
+          throw new Error(
+            'Spear Pillar: poll without a live effect',
+          );
+        }
+
+        if (r.spearField.done()) {
+          result = 1;
+          r.disposeSpearField();
+        }
       } else if (mode === 0 || mode === 4) {
-        if (effect) throw new Error('Spear Pillar: effect already live');
-        effect = new SpearFieldEffects(r, data(), mode);
-        const zone = r.field.player().zone;
-        update = () => { if (r.field.player().zone !== zone) dispose(); else effect!.step(); };
-        r.backgroundTasks.add(update);
+        r.startSpearField(data(), mode);
       } else if (mode === 5) {
-        if (!effect || effect.mode !== 4) throw new Error('Spear Pillar: guardian finish without its controller');
-        effect.finishGuardians();
+        if (
+          !r.spearField ||
+          r.spearField.mode !== 4
+        ) {
+          throw new Error(
+            'Spear Pillar: guardian finish without its controller',
+          );
+        }
+
+        r.spearField.finishGuardians();
       } else {
         r.log.stub(`spear-field:mode-${mode}`, 'non-story camera/ring selector is not implemented');
       }

@@ -55,6 +55,12 @@ import { journalHandlers } from './journal-ops.ts';
 import { tvHandlers } from './tv-ops.ts';
 import { npcHandlers } from './npc-ops.ts';
 import { townFieldHandlers } from './town-field-ops.ts';
+import {
+  SpearFieldEffects,
+} from './spear-field.ts';
+import type {
+  SpearPillarAssets,
+} from '@opensinnoh/contracts';
 
 /** Fixed native vars, looked up by `sourceIndex` in the vars registry. */
 export const NATIVE_VARS = { PLAYER_STARTER: 0x4030, SCRIPT_PARAMETER_0: 0x8000, LAST_TALKED: 0x800d } as const;
@@ -216,7 +222,8 @@ export const createScriptRunner: CreateScriptRunner = (deps) => new Runner(deps)
 export class Runner implements ScriptRunner {
   thread: Thread | null = null;
   tick = 0;
-  readonly backgroundTasks = new Set<() => void>();
+  spearField: SpearFieldEffects | null = null;
+  private spearFieldZone: Id | null = null;
   readonly opState: RunnerOpState = {
     sideTrade: null,
     contestFlash: null,
@@ -413,8 +420,42 @@ export class Runner implements ScriptRunner {
     answer(yes);
   }
 
+  startSpearField(
+    data: SpearPillarAssets,
+    mode: number,
+  ): void {
+    if (this.spearField) {
+      throw new Error(
+        'Spear Pillar: effect already live',
+      );
+    }
+
+    this.spearField = new SpearFieldEffects(
+      this,
+      data,
+      mode,
+    );
+    this.spearFieldZone = this.field.player().zone;
+  }
+
+  disposeSpearField(): void {
+    this.spearField = null;
+    this.spearFieldZone = null;
+    this.field.setStoryScene(null);
+  }
+
   step(input: InputFrame): void {
-    for (const task of this.backgroundTasks) task();
+    if (this.spearField) {
+      if (
+        this.field.player().zone !==
+        this.spearFieldZone
+      ) {
+        this.disposeSpearField();
+      } else {
+        this.spearField.step();
+      }
+    }
+
     this.tick++;
     if (this.noticeOpen) this.stepNotice(input);
     else if (this.thread) {

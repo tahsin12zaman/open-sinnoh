@@ -2,6 +2,18 @@ import type { SpearPillarAssets, StoryActor, StorySceneView, Vec3 } from '@opens
 import type { Runner } from './runner.ts';
 
 /** Field effects have a lifetime independent of the script that starts/polls them. */
+export interface SpearFieldRuntimeSnapshot {
+  mode: number;
+  tick: number;
+  terminal: boolean;
+  brightness: number;
+  blend: number;
+  anchor: Vec3;
+  guardian: number;
+  guardianTick: number;
+  finish: number;
+}
+
 export class SpearFieldEffects {
   private tick = 0;
   private terminal = false;
@@ -15,12 +27,79 @@ export class SpearFieldEffects {
     private readonly r: Runner,
     private readonly data: SpearPillarAssets,
     readonly mode: number,
+    snapshot?: SpearFieldRuntimeSnapshot,
   ) {
+    if (snapshot) {
+      if (
+        snapshot.mode !== mode ||
+        !Number.isSafeInteger(snapshot.tick) ||
+        snapshot.tick < 0 ||
+        typeof snapshot.terminal !== 'boolean' ||
+        !Number.isFinite(snapshot.brightness) ||
+        !Number.isFinite(snapshot.blend) ||
+        !Array.isArray(snapshot.anchor) ||
+        snapshot.anchor.length !== 3 ||
+        !snapshot.anchor.every(Number.isFinite) ||
+        !Number.isSafeInteger(snapshot.guardian) ||
+        snapshot.guardian < 0 ||
+        snapshot.guardian > 3 ||
+        !Number.isSafeInteger(snapshot.guardianTick) ||
+        snapshot.guardianTick < 0 ||
+        !Number.isSafeInteger(snapshot.finish) ||
+        snapshot.finish < 0
+      ) {
+        throw new Error(
+          'malformed Spear Pillar field-effect snapshot',
+        );
+      }
+
+      this.tick = snapshot.tick;
+      this.terminal = snapshot.terminal;
+      this.brightness = snapshot.brightness;
+      this.blend = snapshot.blend;
+      this.anchor = [...snapshot.anchor];
+      this.guardian = snapshot.guardian;
+      this.guardianTick = snapshot.guardianTick;
+      this.finish = snapshot.finish;
+      this.draw();
+      return;
+    }
+
     if (mode === 0) {
       r.field.objectPosition(0);
       this.anchor = r.field.objectPosition(1);
-    } else this.anchor = r.field.objectPosition(0);
+    } else {
+      this.anchor = r.field.objectPosition(0);
+    }
+
     this.draw();
+  }
+
+  captureRuntimeSnapshot(): SpearFieldRuntimeSnapshot {
+    return {
+      mode: this.mode,
+      tick: this.tick,
+      terminal: this.terminal,
+      brightness: this.brightness,
+      blend: this.blend,
+      anchor: [...this.anchor],
+      guardian: this.guardian,
+      guardianTick: this.guardianTick,
+      finish: this.finish,
+    };
+  }
+
+  static fromRuntimeSnapshot(
+    runner: Runner,
+    data: SpearPillarAssets,
+    snapshot: SpearFieldRuntimeSnapshot,
+  ): SpearFieldEffects {
+    return new SpearFieldEffects(
+      runner,
+      data,
+      snapshot.mode,
+      snapshot,
+    );
   }
   done(): boolean {
     return this.terminal;
