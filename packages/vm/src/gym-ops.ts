@@ -4,7 +4,6 @@
  * handlers (scrcmd.c); 'continue' where they return FALSE, 'yield' where they return TRUE.
  */
 import { newGameRecord } from '@opensinnoh/contracts';
-import type { TextPrinter } from '@opensinnoh/text';
 import type { Handler, Runner } from './runner.ts';
 
 export function gymHandlers(r: Runner): Record<string, Handler> {
@@ -52,30 +51,16 @@ export function gymHandlers(r: Runner): Record<string, Handler> {
       if (!r.field.advanceEternaGymClock()) return 'yield';
       const text = newGameRecord(r.registries).gyms?.eterna.message;
       if (!text) throw new Error('advance_eterna_gym_clock: NewGame.gyms has no Eterna Gym message');
-      let printer: TextPrinter | null = null;
-      let printed = false;
-      return r.pause(c, (input) => {
-        const phase = r.field.eternaGymClock();
-        if (phase === 'done') return true;
-        if (phase !== 'message') return false;
-        if (!printer) {
-          printer = r.showMessage(t, text, r.textSpeed());
-          return false;
-        }
-        if (!printed) {
-          // FieldMessage_FinishedPrinting, then the same frame's JOY_NEW check (case 11 falls into 12).
-          if (!printer.done) return false;
-          printed = true;
-          r.ui.buttonWait = true;
-        }
-        if (!input.pressed.includes('a') && !input.pressed.includes('b')) return false;
-        r.ui.message = null;
-        r.ui.buttonWait = false;
-        printer = null;
-        printed = false;
-        r.field.eternaGymClockContinue();
-        return false;
-      });
+      return r.pause(
+        c,
+        () => false,
+        {
+          kind: 'eterna-clock',
+          text,
+          messageStarted: false,
+          printed: false,
+        },
+      );
     },
   };
 }

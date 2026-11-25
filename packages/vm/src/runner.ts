@@ -159,6 +159,12 @@ export type RuntimeWait =
     }
   | { kind: 'battle' }
   | {
+      kind: 'eterna-clock';
+      text: Id;
+      messageStarted: boolean;
+      printed: boolean;
+    }
+  | {
       kind: 'script-menu';
       menuKind: MenuKind;
       offsetVariable: Id | null;
@@ -1124,6 +1130,53 @@ export class Runner implements ScriptRunner {
 
         t.battleOutcome = result.outcome;
         return true;
+      }
+
+      case 'eterna-clock': {
+        const phase = this.field.eternaGymClock();
+
+        if (phase === 'done') return true;
+        if (phase !== 'message') return false;
+
+        if (!wait.messageStarted) {
+          this.showMessage(
+            t,
+            wait.text,
+            this.textSpeed(),
+          );
+
+          wait.messageStarted = true;
+          return false;
+        }
+
+        const printer = this.ui.message?.printer;
+
+        if (!printer) {
+          throw new Error(
+            'Eterna clock message has no printer',
+          );
+        }
+
+        if (!wait.printed) {
+          if (!printer.done) return false;
+
+          wait.printed = true;
+          this.ui.buttonWait = true;
+        }
+
+        if (
+          !has(input.pressed, 'a') &&
+          !has(input.pressed, 'b')
+        ) {
+          return false;
+        }
+
+        this.ui.message = null;
+        this.ui.buttonWait = false;
+        wait.messageStarted = false;
+        wait.printed = false;
+        this.field.eternaGymClockContinue();
+        return false;
       }
 
       case 'script-menu': {
