@@ -6,7 +6,7 @@
  * The battle commands are in m2a-ops.ts.
  */
 import { dayOfWeek, type Arg, type Id } from '@opensinnoh/core';
-import type { Facing, InputFrame } from '@opensinnoh/contracts';
+import type { Facing } from '@opensinnoh/contracts';
 import { TEXT_SPEED, TextPrinter, plainMarkup, toPrintOps } from '@opensinnoh/text';
 import { LIST_HEADER, MENU_RESULT, NO_ALT_TEXT, ScriptMenu, type MenuKind } from './menu.ts';
 import type { Context, Handler, Result, Runner, Thread } from './runner.ts';
@@ -299,11 +299,18 @@ export function m1aHandlers(r: Runner): Record<string, Handler> {
       const rowVar = r.ref(a[1], 'var');
       const m = menu();
       m.remember(r.getVar(t, offsetVar), r.getVar(t, rowVar));
-      return showScriptMenu(r, t, c, m, 'list', undefined, () => {
-        const p = m.listPosition();
-        r.setVar(t, offsetVar, p.offset);
-        r.setVar(t, rowVar, p.row);
-      });
+      return showScriptMenu(
+        r,
+        t,
+        c,
+        m,
+        'list',
+        undefined,
+        {
+          offsetVariable: offsetVar,
+          rowVariable: rowVar,
+        },
+      );
     },
     // Decomp ScrCmd_ShowListMenuSetWidth → FieldMenuManager_ShowListMenuWithWidth: the list at a set width (tiles).
     show_list_menu_set_width: (t, c, a) => showScriptMenu(r, t, c, menu(), 'list', undefined, undefined, val(t, a[0])),
@@ -359,22 +366,56 @@ function showAltText(r: Runner, t: Thread, m: ScriptMenu): void {
  * Shows a scripted menu (`r.ui.menu`) and waits for a choice, written to `t.menuVar` (decomp FieldMenuManager_Show*
  * and ListMenu input in their SysTasks). The move tutors' list uses it too.
  */
-export function showScriptMenu(r: Runner, t: Thread, c: Context, m: ScriptMenu, kind: MenuKind, columns?: number, moved?: () => void, width?: number): Result {
-  m.show(kind, (s) => measureText(r, s), columns, width);
-  if (kind === 'list') showAltText(r, t, m);
-  moved?.();
-  return r.pause(c, (input: InputFrame) => {
-    const touch = input.touch?.screen === 'main' && !r.lastTouch ? input.touch : null;
-    const before = m.current;
-    const result = m.step(input, touch);
-    if (m.current !== before) moved?.();
-    if (m.current !== before || result !== null) r.playFieldSe(1500);
-    if (result === null) {
-      if (kind === 'list' && m.current !== before) showAltText(r, t, m);
-      return false;
-    }
-    r.setVar(t, t.menuVar!, result);
-    r.ui.menu = null;
-    return true;
-  });
+export function showScriptMenu(
+  r: Runner,
+  t: Thread,
+  c: Context,
+  m: ScriptMenu,
+  kind: MenuKind,
+  columns?: number,
+  remembered?: {
+    offsetVariable: Id;
+    rowVariable: Id;
+  },
+  width?: number,
+): Result {
+  m.show(
+    kind,
+    (text) => measureText(r, text),
+    columns,
+    width,
+  );
+
+  if (kind === 'list') {
+    showAltText(r, t, m);
+  }
+
+  if (remembered) {
+    const position = m.listPosition();
+
+    r.setVar(
+      t,
+      remembered.offsetVariable,
+      position.offset,
+    );
+
+    r.setVar(
+      t,
+      remembered.rowVariable,
+      position.row,
+    );
+  }
+
+  return r.pause(
+    c,
+    () => false,
+    {
+      kind: 'script-menu',
+      menuKind: kind,
+      offsetVariable:
+        remembered?.offsetVariable ?? null,
+      rowVariable:
+        remembered?.rowVariable ?? null,
+    },
+  );
 }

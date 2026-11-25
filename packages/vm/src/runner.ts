@@ -22,7 +22,11 @@ import { LOCALID_FOLLOWER, newGameRecord, type AppRequest, type AppResult, type 
 import { TEXT_SPEED, TextPrinter, hitChoice, plainMarkup, toPrintOps } from '@opensinnoh/text';
 import { classifyOp, stubDefault } from './classify.ts';
 import { COMMAND_BY_NAME, CONDITIONS } from './commands.ts';
-import type { ScriptMenu } from './menu.ts';
+import {
+  NO_ALT_TEXT,
+  type MenuKind,
+  type ScriptMenu,
+} from './menu.ts';
 import { BANKS, m1aHandlers } from './ops.ts';
 import { m1bHandlers } from './m1b-ops.ts';
 import { partyHandlers } from './party-ops.ts';
@@ -154,6 +158,12 @@ export type RuntimeWait =
       index: number;
     }
   | { kind: 'battle' }
+  | {
+      kind: 'script-menu';
+      menuKind: MenuKind;
+      offsetVariable: Id | null;
+      rowVariable: Id | null;
+    }
   | {
       kind: 'scene-shake';
       phase:
@@ -1113,6 +1123,94 @@ export class Runner implements ScriptRunner {
         if (!result) return false;
 
         t.battleOutcome = result.outcome;
+        return true;
+      }
+
+      case 'script-menu': {
+        const menu = this.ui.menu;
+
+        if (!menu) {
+          throw new Error(
+            'script-menu wait has no menu',
+          );
+        }
+
+        const touch =
+          input.touch?.screen === 'main' &&
+          !this.lastTouch
+            ? input.touch
+            : null;
+
+        const before = menu.current;
+        const result = menu.step(input, touch);
+        const moved = menu.current !== before;
+
+        if (
+          moved &&
+          wait.offsetVariable &&
+          wait.rowVariable
+        ) {
+          const position = menu.listPosition();
+
+          this.setVar(
+            t,
+            wait.offsetVariable,
+            position.offset,
+          );
+
+          this.setVar(
+            t,
+            wait.rowVariable,
+            position.row,
+          );
+        }
+
+        if (moved || result !== null) {
+          this.playFieldSe(SE_CONFIRM);
+        }
+
+        if (result === null) {
+          if (
+            wait.menuKind === 'list' &&
+            moved
+          ) {
+            const alt = menu.current.altText;
+
+            if (
+              alt !== undefined &&
+              alt !== NO_ALT_TEXT
+            ) {
+              this.ui.message = {
+                printer: new TextPrinter(
+                  toPrintOps(
+                    this.textOf(
+                      this.bankText(
+                        menu.bank,
+                        alt,
+                      ),
+                    ),
+                    t.slots,
+                  ),
+                  {
+                    speed:
+                      TEXT_SPEED.instant,
+                  },
+                ),
+              };
+            }
+          }
+
+          return false;
+        }
+
+        if (!t.menuVar) {
+          throw new Error(
+            'script-menu wait has no result variable',
+          );
+        }
+
+        this.setVar(t, t.menuVar, result);
+        this.ui.menu = null;
         return true;
       }
 

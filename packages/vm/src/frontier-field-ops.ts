@@ -396,11 +396,19 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
       t.menuVar = r.ref(a[2], 'var');
       r.setVar(t, t.menuVar, MENU_RESULT.pending);
       r.ui.menu = m;
-      return showScriptMenu(r, t, c, m, 'list', undefined, () => {
-        const p = m.listPosition();
-        r.setVar(t, offsetVar, p.offset);
-        r.setVar(t, rowVar, p.row);
-      }, HALL_RECORD_LIST.width);
+      return showScriptMenu(
+        r,
+        t,
+        c,
+        m,
+        'list',
+        undefined,
+        {
+          offsetVariable: offsetVar,
+          rowVariable: rowVar,
+        },
+        HALL_RECORD_LIST.width,
+      );
     },
     /**
      * Decomp ScrCmd_OpenFrontierRecordsApp → FieldSystem_OpenBattleFrontierRecord: the record viewer for the challenge
