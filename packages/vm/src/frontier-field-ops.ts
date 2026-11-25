@@ -114,11 +114,8 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
     return r.tower;
   };
   /** The party menu's pick (decomp SCRIPT_MANAGER_PARTY_MANAGEMENT_DATA) between BT_FUNC_UNK_30 and _31. */
-  let picked: number[] | null | undefined;
   /** The Hall's party pick (the same script member) between BH_LOBBY_FUNC_SELECT_POKEMON and GetBattleHallSelectedSlots. */
-  let hallPicked: number[] | null | undefined;
   /** The Castle's and the Arcade's (SelectBattleCastleChallengers / SelectBattleArcadeChallengers, PARTY_MENU_MODE_BATTLE_CASTLE). */
-  let castlePicked: number[] | null | undefined;
 
   /**
    * Decomp ScrCmd_CallBattleCastleLobbyFunction / ScrCmd_CallBattleArcadeLobbyFunction: the party check (sub_02049EC4 with
@@ -144,7 +141,7 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
         if (arg > 1) throw new Error(`${name} SELECT_POKEMON: the multi challenge needs a link partner`);
         return r.openApp(c, { app: 'party-order', count: CASTLE.partySize, castle: true }, (result) => {
           if (result.app !== 'party-order') throw new Error(`${name} SELECT_POKEMON: got a ${result.app} result`);
-          castlePicked = result.order;
+          r.opState.frontierCastlePicked = result.order;
         });
       default:
         throw new Error(`${name}: no lobby function ${fn}`);
@@ -153,10 +150,10 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
   };
   /** Decomp ScrCmd_GetBattleCastleSelectedSlots / ScrCmd_GetBattleArcadeSelectedSlots: the picks, or PARTY_SLOT_NONE in the first. */
   const selectedSlots: Handler = (t, _c, a) => {
-    if (castlePicked === undefined) throw new Error('get_battle_castle/arcade_selected_slots: no party menu has run');
-    if (castlePicked === null) dest(t, a[0], PARTY_SLOT_NONE);
-    else castlePicked.forEach((slot, i) => dest(t, a[i], slot));
-    castlePicked = undefined;
+    if (r.opState.frontierCastlePicked === undefined) throw new Error('get_battle_castle/arcade_selected_slots: no party menu has run');
+    if (r.opState.frontierCastlePicked === null) dest(t, a[0], PARTY_SLOT_NONE);
+    else r.opState.frontierCastlePicked.forEach((slot, i) => dest(t, a[i], slot));
+    r.opState.frontierCastlePicked = undefined;
     return 'continue';
   };
   /** A species' number (the scripts' species operands). */
@@ -256,13 +253,13 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
         case BT.openPartyMenu:
           return r.openApp(c, { app: 'party-order', count: tower('BT_FUNC_UNK_30').partySize }, (result) => {
             if (result.app !== 'party-order') throw new Error(`BT_FUNC_UNK_30: got a ${result.app} result`);
-            picked = result.order;
+            r.opState.frontierPicked = result.order;
           });
         // Decomp sub_0204A378: 0 when cancelled, else the picks are the challenge's (slots, species, items).
         case BT.readPartyMenu: {
-          if (picked === undefined) throw new Error('BT_FUNC_UNK_31: no party menu has run');
-          const order = picked;
-          picked = undefined;
+          if (r.opState.frontierPicked === undefined) throw new Error('BT_FUNC_UNK_31: no party menu has run');
+          const order = r.opState.frontierPicked;
+          r.opState.frontierPicked = undefined;
           if (order) tower('BT_FUNC_UNK_31').setSelection(order);
           out(order ? 1 : 0);
           break;
@@ -362,7 +359,7 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
           if (arg > 1) throw new Error('BH_LOBBY_FUNC_SELECT_POKEMON: the multi challenge needs a link partner');
           return r.openApp(c, { app: 'party-order', count: hallPartySize(arg), hall: true }, (result) => {
             if (result.app !== 'party-order') throw new Error(`BH_LOBBY_FUNC_SELECT_POKEMON: got a ${result.app} result`);
-            hallPicked = result.order;
+            r.opState.frontierHallPicked = result.order;
           });
         }
         default:
@@ -372,13 +369,13 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
     },
     // Decomp ScrCmd_GetBattleHallSelectedSlots: the picks, or PARTY_SLOT_NONE in the first when cancelled.
     get_battle_hall_selected_slots: (t, _c, a) => {
-      if (hallPicked === undefined) throw new Error('get_battle_hall_selected_slots: no party menu has run');
-      if (hallPicked === null) dest(t, a[0], PARTY_SLOT_NONE);
+      if (r.opState.frontierHallPicked === undefined) throw new Error('get_battle_hall_selected_slots: no party menu has run');
+      if (r.opState.frontierHallPicked === null) dest(t, a[0], PARTY_SLOT_NONE);
       else {
-        dest(t, a[0], hallPicked[0]!);
-        dest(t, a[1], hallPicked[1] ?? 0);
+        dest(t, a[0], r.opState.frontierHallPicked[0]!);
+        dest(t, a[1], r.opState.frontierHallPicked[1] ?? 0);
       }
-      hallPicked = undefined;
+      r.opState.frontierHallPicked = undefined;
       return 'continue';
     },
     delete_active_battle_hall_streak: (t, _c, a) => (deleteHallStreak(r.state, val(t, a[0])), 'continue'),

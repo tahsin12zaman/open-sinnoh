@@ -49,7 +49,6 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
    * The party pick of the last party menu a script opened (decomp SCRIPT_MANAGER_PARTY_MANAGEMENT_DATA),
    * until `get_selected_party_slot` reads it: undefined when none is pending.
    */
-  let picked: number | null | undefined;
 
   const partyMon = (op: string, slot: number): Pokemon => {
     const m = r.state.party[slot];
@@ -87,19 +86,19 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
     select_move_tutor_pokemon: (_t, c) =>
       r.openApp(c, { app: 'party', mode: 'select' }, (result) => {
         if (result.app !== 'party') throw new Error(`select_move_tutor_pokemon: got a ${result.app} result`);
-        picked = result.slot;
+        r.opState.m3aPicked = result.slot;
       }),
     // Decomp ScrCmd_OpenPartyMenuForTrade: PARTY_MENU_MODE_NPC_TRADE, which picks like SELECT_NO_PROMPT after the Ball Capsule check.
     open_party_menu_for_trade: (_t, c) =>
       r.openApp(c, { app: 'party', mode: 'trade' }, (result) => {
         if (result.app !== 'party') throw new Error(`open_party_menu_for_trade: got a ${result.app} result`);
-        picked = result.slot;
+        r.opState.m3aPicked = result.slot;
       }),
     // Decomp ScrCmd_GetSelectedPartySlot: the picked slot, PARTY_SLOT_NONE when cancelled.
     get_selected_party_slot: (t, _c, a) => {
-      if (picked === undefined) throw new Error('get_selected_party_slot: no party menu ran before it');
-      r.setVar(t, r.ref(a[0], 'var'), picked ?? PARTY_SLOT_NONE);
-      picked = undefined;
+      if (r.opState.m3aPicked === undefined) throw new Error('get_selected_party_slot: no party menu ran before it');
+      r.setVar(t, r.ref(a[0], 'var'), r.opState.m3aPicked ?? PARTY_SLOT_NONE);
+      r.opState.m3aPicked = undefined;
       return 'continue';
     },
     // Decomp ScrCmd_CountPartyRibbons: the ribbon ids at least one non-egg party Pokémon has.

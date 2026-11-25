@@ -68,16 +68,12 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
   };
 
   /** The script bag's pick (SCRIPT_MANAGER_PARTY_MANAGEMENT_DATA) until `get_selected_item` reads it. */
-  let bagPick: Id | null | undefined;
   /** The move reminder's outcome until `check_learned_*_move` reads it. */
-  let learned: boolean | undefined;
   /** The summary's move pick (`select_party_mon_move`) until `get_selected_party_mon_move` reads it. */
-  let movePick: number | null | undefined;
   /** The NPC trade `init_npc_trade` loaded (SCRIPT_MANAGER_DATA_PTR) until `finish_npc_trade`. */
-  let trade: number | null = null;
   const loadedTrade = (op: string) => {
-    if (trade === null) throw new Error(`${op}: no NPC trade loaded (init_npc_trade)`);
-    return npcTrade(r.registries, trade);
+    if (r.opState.sideTrade === null) throw new Error(`${op}: no NPC trade loaded (init_npc_trade)`);
+    return npcTrade(r.registries, r.opState.sideTrade);
   };
 
   return {
@@ -128,14 +124,14 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
       const pocket = BAG_POCKETS[r.int(a[0]) === 0 ? 0 : 1];
       return r.openApp(c, { app: 'bag-pick', pocket }, (result) => {
         if (result.app !== 'bag-pick') throw new Error(`open_bag: got a ${result.app} result`);
-        bagPick = result.item;
+        r.opState.sideBagPick = result.item;
       });
     },
     /** ScrCmd_GetSelectedItem: the item picked, ITEM_NONE (0) for none. */
     get_selected_item: (t, _c, a) => {
-      if (bagPick === undefined) throw new Error('get_selected_item: no bag ran (open_bag)');
-      dest(t, a[0], itemIndex(bagPick));
-      bagPick = undefined;
+      if (r.opState.sideBagPick === undefined) throw new Error('get_selected_item: no bag ran (open_bag)');
+      dest(t, a[0], itemIndex(r.opState.sideBagPick));
+      r.opState.sideBagPick = undefined;
       return 'continue';
     },
 
@@ -194,7 +190,7 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
       const slot = val(t, a[0]);
       return r.openApp(c, { app: 'move-reminder', slot, moves: reminderMoves(r.registries, partyMon('open_move_reminder_menu', slot)), tutor: false }, (result) => {
         if (result.app !== 'move-reminder') throw new Error(`open_move_reminder_menu: got a ${result.app} result`);
-        learned = result.learned;
+        r.opState.sideLearned = result.learned;
       });
     },
     open_move_tutor_menu: (t, c, a) => {
@@ -202,7 +198,7 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
       partyMon('open_move_tutor_menu', slot);
       return r.openApp(c, { app: 'move-reminder', slot, moves: [moveId(val(t, a[1]))], tutor: true }, (result) => {
         if (result.app !== 'move-reminder') throw new Error(`open_move_tutor_menu: got a ${result.app} result`);
-        learned = result.learned;
+        r.opState.sideLearned = result.learned;
       });
     },
     /** ScrCmd_CheckLearnedReminderMove / _TutorMove: 0 when a move was learned, 0xFF when the old moves stayed. */
@@ -214,14 +210,14 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
       partyMon('select_party_mon_move', slot);
       return r.openApp(c, { app: 'summary-teach', slot, move: null }, (result) => {
         if (result.app !== 'summary-teach') throw new Error(`select_party_mon_move: got a ${result.app} result`);
-        movePick = result.forget;
+        r.opState.sideMovePick = result.forget;
       });
     },
     /** ScrCmd_GetSelectedPartyMonMove: the move slot picked, MOVE_NOT_SELECTED for none. */
     get_selected_party_mon_move: (t, _c, a) => {
-      if (movePick === undefined) throw new Error('get_selected_party_mon_move: no summary ran (select_party_mon_move)');
-      dest(t, a[0], movePick ?? MOVE_NOT_SELECTED);
-      movePick = undefined;
+      if (r.opState.sideMovePick === undefined) throw new Error('get_selected_party_mon_move: no summary ran (select_party_mon_move)');
+      dest(t, a[0], r.opState.sideMovePick ?? MOVE_NOT_SELECTED);
+      r.opState.sideMovePick = undefined;
       return 'continue';
     },
     /** ScrCmd_ClearPartyMonMoveSlot (Pokemon_ClearMoveSlot): the moves after it move up. */
@@ -237,7 +233,7 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
     init_npc_trade: (_t, _c, a) => {
       const id = r.int(a[0]);
       npcTrade(r.registries, id);
-      trade = id;
+      r.opState.sideTrade = id;
       return 'continue';
     },
     get_npc_trade_species: (t, _c, a) => (dest(t, a[0], r.registries.species.get(loadedTrade('get_npc_trade_species').species)!.sourceIndex!), 'continue'),
@@ -265,7 +261,7 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
     },
     finish_npc_trade: () => {
       loadedTrade('finish_npc_trade');
-      trade = null;
+      r.opState.sideTrade = null;
       return 'continue';
     },
   };
@@ -276,9 +272,9 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
   }
 
   function readLearned(t: Thread, a: Arg[], op: string): 'continue' {
-    if (learned === undefined) throw new Error(`${op}: no move reminder ran`);
-    dest(t, a[0], learned ? 0 : 0xff);
-    learned = undefined;
+    if (r.opState.sideLearned === undefined) throw new Error(`${op}: no move reminder ran`);
+    dest(t, a[0], r.opState.sideLearned ? 0 : 0xff);
+    r.opState.sideLearned = undefined;
     return 'continue';
   }
 }

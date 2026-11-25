@@ -162,6 +162,25 @@ export interface Thread {
   turnAfterHealing: Facing | null;
 }
 
+/**
+ * Persistent values owned by script-operation modules. Optional fields
+ * distinguish “no operation has completed” from a completed cancellation
+ * represented by null.
+ */
+export interface RunnerOpState {
+  contestPick?: number | null;
+  daycarePick?: number | null;
+  formSummaryPick?: number | null;
+  frontierPicked?: number[] | null;
+  frontierHallPicked?: number[] | null;
+  frontierCastlePicked?: number[] | null;
+  m3aPicked?: number | null;
+  sideBagPick?: Id | null;
+  sideLearned?: boolean;
+  sideMovePick?: number | null;
+  sideTrade: number | null;
+}
+
 export type Result = 'continue' | 'yield';
 export type Handler = (t: Thread, c: Context, args: Arg[]) => Result;
 
@@ -182,6 +201,9 @@ export class Runner implements ScriptRunner {
   thread: Thread | null = null;
   tick = 0;
   readonly backgroundTasks = new Set<() => void>();
+  readonly opState: RunnerOpState = {
+    sideTrade: null,
+  };
   lastTouch: InputFrame['touch'] = null;
   /** This tick's input, for commands that read the keys directly (decomp gSystem.heldKeys: `check_ab_press`). */
   input: InputFrame = { held: [], pressed: [], touch: null };

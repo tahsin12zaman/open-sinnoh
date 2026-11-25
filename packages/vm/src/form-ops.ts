@@ -29,7 +29,6 @@ export function formHandlers(r: Runner): Record<string, Handler> {
   };
   const isRotom = (m: Pokemon | null | undefined): m is Pokemon => !!m && !m.isEgg && isSpecies(r.registries, m, SPECIES.rotom);
   /** The summary's pick (`open_summary_screen_teach_move`) until `get_summary_selected_move_slot` reads it; undefined when none is pending. */
-  let summaryPick: number | null | undefined;
 
   return {
     /**
@@ -104,14 +103,14 @@ export function formHandlers(r: Runner): Record<string, Handler> {
       if (!move) throw new Error(`open_summary_screen_teach_move: no move ${val(t, a[1])}`);
       return r.openApp(c, { app: 'summary-teach', slot, move }, (result) => {
         if (result.app !== 'summary-teach') throw new Error(`open_summary_screen_teach_move: got a ${result.app} result`);
-        summaryPick = result.forget;
+        r.opState.formSummaryPick = result.forget;
       });
     },
     /** ScrCmd_GetSummarySelectedMoveSlot: the move slot picked, LEARNED_MOVES_MAX for none. TRUE. */
     get_summary_selected_move_slot: (t, _c, a) => {
-      if (summaryPick === undefined) throw new Error('get_summary_selected_move_slot: no summary ran (open_summary_screen_teach_move)');
-      dest(t, a[0], summaryPick ?? LEARNED_MOVES_MAX);
-      summaryPick = undefined;
+      if (r.opState.formSummaryPick === undefined) throw new Error('get_summary_selected_move_slot: no summary ran (open_summary_screen_teach_move)');
+      dest(t, a[0], r.opState.formSummaryPick ?? LEARNED_MOVES_MAX);
+      r.opState.formSummaryPick = undefined;
       return 'yield';
     },
 

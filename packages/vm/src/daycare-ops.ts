@@ -46,7 +46,6 @@ export function daycareHandlers(r: Runner): Record<string, Handler> {
   };
   const met = () => ({ zone: state().player.zone, level: 0, date: r.clock().date });
   /** The daycare party menu's pick until `get_day_care_party_menu_result` reads it (decomp SCRIPT_MANAGER_PARTY_MANAGEMENT_DATA). */
-  let pick: number | null | undefined;
 
   return {
     // Decomp ov5_021E72BC: slot 0 = the first Pokémon's nickname, 1 = the second's, 2 = the first's OT name.
@@ -84,12 +83,12 @@ export function daycareHandlers(r: Runner): Record<string, Handler> {
     open_party_menu_for_daycare: (_t, c) =>
       r.openApp(c, { app: 'daycare-select' }, (result) => {
         if (result.app !== 'daycare-select') throw new Error(`open_party_menu_for_daycare: got a ${result.app} result`);
-        pick = result.slot;
+        r.opState.daycarePick = result.slot;
       }),
     get_day_care_party_menu_result: (t, _c, a) => {
-      const slot = pick;
+      const slot = r.opState.daycarePick;
       if (slot === undefined) throw new Error('get_day_care_party_menu_result: no daycare party menu ran');
-      pick = undefined;
+      r.opState.daycarePick = undefined;
       dest(t, a[0], slot ?? PARTY_SLOT_NONE);
       dest(t, a[1], 0);
       return 'continue';

@@ -55,7 +55,6 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
   const contestText = (i: number) => r.textOf(r.bankText(CONTEST_TEXT.bank, i));
   const practice = (s: ContestSession) => s.mode === 'practice';
   /** The pick of the contest party menu until `get_contest_party_menu_result` reads it. */
-  let pick: number | null | undefined;
   /** The camera flash task (decomp ContestCameraFlashTask), while it runs. */
   let flash: { delays: readonly number[]; count: number; frame: number } | null = null;
   const seq = (n: number) => r.source('sequences', n, false);
@@ -217,15 +216,15 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
       const rank = val(t, a[3]) ? 0 : val(t, a[1]);
       return r.openApp(c, { app: 'contest-select', rank, type: val(t, a[2]) }, (res) => {
         if (res.app !== 'contest-select') throw new Error(`open_party_menu_for_contest: got ${res.app}`);
-        pick = res.slot;
+        r.opState.contestPick = res.slot;
       });
     },
     /** ScrCmd_GetContestPartyMenuResult: the slot (PARTY_SLOT_NONE for none); SUMMARY runs inside the app, so never "show summary". */
     get_contest_party_menu_result: (t, _c, a) => {
-      if (pick === undefined) throw new Error('get_contest_party_menu_result: no contest party menu ran');
-      dest(t, a[0], pick ?? PARTY_SLOT_NONE);
+      if (r.opState.contestPick === undefined) throw new Error('get_contest_party_menu_result: no contest party menu ran');
+      dest(t, a[0], r.opState.contestPick ?? PARTY_SLOT_NONE);
       dest(t, a[1], 0);
-      pick = undefined;
+      r.opState.contestPick = undefined;
       return 'continue';
     },
     /**
