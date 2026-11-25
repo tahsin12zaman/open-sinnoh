@@ -133,6 +133,59 @@ test:WaitAB::
     expect((d.vm as Runner).thread).toBeNull();
   });
 
+  it('wait_ab_press_time keeps its countdown in the descriptor', () => {
+    const d = run(`
+test:WaitABTime::
+  wait_ab_press_time 3
+  end
+`);
+
+    d.vm.start({
+      label: 'test:WaitABTime',
+      zone: 'fixture:TOWN',
+      source: 'test',
+    });
+
+    d.tick();
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0]?.waitState,
+    ).toEqual({
+      kind: 'ab-time',
+      left: 3,
+    });
+
+    d.tick();
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0]?.waitState,
+    ).toEqual({
+      kind: 'ab-time',
+      left: 2,
+    });
+
+    d.tick();
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0]?.waitState,
+    ).toEqual({
+      kind: 'ab-time',
+      left: 1,
+    });
+
+    d.tick();
+
+    expect(
+      (d.vm as Runner).thread?.contexts[0],
+    ).toMatchObject({
+      state: 'running',
+      waitState: null,
+    });
+
+    d.tick();
+    expect((d.vm as Runner).thread).toBeNull();
+  });
+
   it('wait_button: a d-pad press turns the player and ends the wait', () => {
     const d = driver();
     d.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });

@@ -516,7 +516,14 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
     // Decomp ScrCmd_WaitABPressTime: until A or B, or the frames run out (the save's "saved" line, the tower's REST).
     wait_ab_press_time: (t, c, a) => {
       let left = val(t, a[0]);
-      return r.pause(c, (input) => input.pressed.includes('a') || input.pressed.includes('b') || --left <= 0);
+      return r.pause(
+        c,
+        (input) =>
+          input.pressed.includes('a') ||
+          input.pressed.includes('b') ||
+          --left <= 0,
+        { kind: 'ab-time', left },
+      );
     },
 
     // ---------------------------------------------------------------- the in-script save (CommonScript_SaveGame)

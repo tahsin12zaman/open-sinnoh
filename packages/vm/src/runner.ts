@@ -108,7 +108,12 @@ export type RuntimeWait =
   | { kind: 'platform-lift' }
   | { kind: 'elevator' }
   | { kind: 'containment' }
-  | { kind: 'vista-binoculars' };
+  | { kind: 'vista-binoculars' }
+  | { kind: 'audio-se'; sequence: Id }
+  | { kind: 'audio-cry' }
+  | { kind: 'audio-fanfare' }
+  | { kind: 'audio-fade' }
+  | { kind: 'ab-time'; left: number };
 
 export interface Context {
   label: Id;
@@ -691,6 +696,18 @@ export class Runner implements ScriptRunner {
         return this.field.containmentUnitsDone();
       case 'vista-binoculars':
         return this.field.vistaBinocularsDone();
+      case 'audio-se':
+        return !this.audio.sePlaying(wait.sequence);
+      case 'audio-cry':
+        return !this.audio.cryPlaying();
+      case 'audio-fanfare':
+        return !this.audio.waitFanfare();
+      case 'audio-fade':
+        return !this.audio.fadeActive();
+      case 'ab-time':
+        return has(input.pressed, 'a') ||
+          has(input.pressed, 'b') ||
+          --wait.left <= 0;
       case 'starter-choice': {
         const panel = this.ui.panel;
         if (panel.kind !== 'choice') throw new Error('starter-choice runtime wait has no choice panel');

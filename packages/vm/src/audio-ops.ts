@@ -43,7 +43,11 @@ export function audioHandlers(r: Runner): Record<string, Handler> {
     wait_se: (t, c, a) => {
       const s = seq(val(t, a[0]));
       if (!s) return 'continue';
-      return r.pause(c, () => !audio.sePlaying(s));
+      return r.pause(
+        c,
+        () => !audio.sePlaying(s),
+        { kind: 'audio-se', sequence: s },
+      );
     },
     play_cry: (t, _c, a) => {
       // Sound_PlayPokemonCry: SPECIES_NONE and numbers past MAX_SPECIES play Bulbasaur's cry.
@@ -51,14 +55,24 @@ export function audioHandlers(r: Runner): Record<string, Handler> {
       audio.playCry(species(n > 0 && n <= MAX_SPECIES ? n : 1)!);
       return 'continue';
     },
-    wait_cry: (_t, c) => r.pause(c, () => !audio.cryPlaying()),
+    wait_cry: (_t, c) =>
+      r.pause(
+        c,
+        () => !audio.cryPlaying(),
+        { kind: 'audio-cry' },
+      ),
     play_fanfare: (t, _c, a) => {
       const s = seq(val(t, a[0]));
       if (s) audio.playFanfare(s);
       return 'continue';
     },
     // Sound_IsBGMPausedByFanfare: each check counts down the 15-check tail, then the BGM resumes.
-    wait_fanfare: (_t, c) => r.pause(c, () => !audio.waitFanfare()),
+    wait_fanfare: (_t, c) =>
+      r.pause(
+        c,
+        () => !audio.waitFanfare(),
+        { kind: 'audio-fanfare' },
+      ),
     play_music: (t, _c, a) => {
       const s = seq(val(t, a[0]));
       if (s) audio.playBgm(s);
@@ -73,11 +87,19 @@ export function audioHandlers(r: Runner): Record<string, Handler> {
     set_special_bgm: (t, _c, a) => (audio.setSpecialBgm(seq(val(t, a[0]))), 'continue'),
     fade_out_bgm: (t, c, a) => {
       audio.fadeOutBgm(val(t, a[0]), val(t, a[1]));
-      return r.pause(c, () => !audio.fadeActive());
+      return r.pause(
+        c,
+        () => !audio.fadeActive(),
+        { kind: 'audio-fade' },
+      );
     },
     fade_in_bgm: (t, c, a) => {
       audio.fadeInBgm(val(t, a[0]));
-      return r.pause(c, () => !audio.fadeActive());
+      return r.pause(
+        c,
+        () => !audio.fadeActive(),
+        { kind: 'audio-fade' },
+      );
     },
     set_bgm_player_paused: (t, _c, a) => {
       const player = val(t, a[0]);
