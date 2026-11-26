@@ -10,7 +10,7 @@ import {
   PANEL_WIDTH,
   type GameState,
   type InputFrame,
-  type RuntimeSnapshot,
+  serializeRuntimeSnapshot,
   type SaveEnvelope,
 } from '@opensinnoh/contracts';
 import { IndexedDbSaveStore, PackMismatchError, saveFromJson, saveToJson, TEXT_FRAME_DELAY, validateSave, type Game, type NewGameOptions, type TextSpeedOption } from '@opensinnoh/game';
@@ -397,59 +397,37 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     fullscreen: fullscreen && { toggle: () => void fullscreen.run().catch((e: Error) => ui!.notice(S.game.fullscreenFailed(e.message))), active: fullscreen.active },
     replay: opts.replay,
   });
-  const runtimeCompatibility = {
-    build: [
-      CONTRACTS_VERSION,
-      ...session.game.loadOrder.map(
-        (pack) => `${pack.id}@${pack.version}`,
-      ),
-    ].join('|'),
-    contracts: CONTRACTS_VERSION,
-  };
-  const runtimeCoordinator =
-    new RuntimeSnapshotCoordinator({
-      compatibility: runtimeCompatibility,
+  // Starting or continuing a game replaces the world and script runner. Bind the
+  // participants to the current game for each shortcut.
+  const runtimeCoordinator = () => {
+    const { game } = session;
+    return new RuntimeSnapshotCoordinator({
+      compatibility: {
+        build: [CONTRACTS_VERSION, ...game.loadOrder.map((pack) => `${pack.id}@${pack.version}`)].join('|'),
+        contracts: CONTRACTS_VERSION,
+      },
       boundary: {
         atTickBoundary: (operation) => {
-          if (runtimeTicking) {
-            throw new Error(
-              'Runtime state is between tick boundaries.',
-            );
-          }
-
-          return operation(
-            session.game.state.tick,
-          );
+          if (runtimeTicking) throw new Error('Runtime state is between tick boundaries.');
+          return operation(game.state.tick);
         },
       },
       participants: [
-        gameSnapshotParticipant(session.game),
-        worldSnapshotParticipant(
-          session.game.world,
-        ),
-        scriptRunnerSnapshotParticipant(
-          session.game.scripts as Runner,
-        ),
+        gameSnapshotParticipant(game),
+        worldSnapshotParticipant(game.world),
+        scriptRunnerSnapshotParticipant(game.scripts as Runner),
         ownedSnapshotParticipant('apps'),
         ownedSnapshotParticipant('battle'),
-        audioSnapshotParticipant(session.game),
+        audioSnapshotParticipant(game),
         ownedSnapshotParticipant('render'),
       ],
       references: () => ({
-        actors: [
-          ...new Set(
-            session.game.state.objects
-              .map((actor) => actor.localId)
-              .filter((id) => id >= 0),
-          ),
-        ],
+        actors: [...new Set(game.state.objects.map((actor) => actor.localId).filter((id) => id >= 0))],
         threads: [],
       }),
     });
-  const runtimeSlots:
-    (RuntimeSnapshot | null)[] =
-      Array<RuntimeSnapshot | null>(10)
-        .fill(null);
+  };
+  const runtimeSlots = new IndexedDbSaveStore('opensinnoh-runtime-states');
   let pageUpHeld = false;
   const runtimeSlot = (
     code: string,
@@ -461,7 +439,7 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
   };
 
   if (!opts.replay) {
-    addEventListener('keydown', (event) => {
+    addEventListener('keydown', async (event) => {
       if (
         root.hidden ||
         titleActive ||
@@ -494,22 +472,17 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
         return;
       }
 
+      const key = String(slot);
       if (event.altKey) {
         event.preventDefault();
 
         try {
-          runtimeSlots[slot] =
-            runtimeCoordinator.capture();
-          ui!.toast(
-            `Saved runtime state ${slot}`,
-          );
+          const snapshot = runtimeCoordinator().capture();
+          await runtimeSlots.putJson(key, serializeRuntimeSnapshot(snapshot));
+          ui!.toast(S.game.runtimeSaved(slot));
         } catch (error) {
           ui!.toast(
-            `State ${slot} was not saved: ${
-              error instanceof Error
-                ? error.message
-                : String(error)
-            }`,
+            S.game.runtimeSaveFailed(slot, error instanceof Error ? error.message : String(error)),
             6000,
           );
         }
@@ -517,23 +490,20 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
         return;
       }
 
-      if (!pageUpHeld || event.altKey) {
-        return;
-      }
+      if (!pageUpHeld) return;
 
       event.preventDefault();
-      const snapshot = runtimeSlots[slot];
-
-      if (!snapshot) {
-        ui!.toast(
-          `Runtime state ${slot} is empty`,
-        );
-        return;
-      }
-
+      const activeSession = session;
+      const activeWorld = session.game.world;
       try {
-        ticks =
-          runtimeCoordinator.restore(snapshot);
+        const json = await runtimeSlots.get(key);
+        if (session !== activeSession || session.game.world !== activeWorld || root.hidden || titleActive || quitting || resetting) return;
+        if (json === undefined) {
+          ui!.toast(S.game.runtimeEmpty(slot));
+          return;
+        }
+
+        ticks = runtimeCoordinator().restore(JSON.parse(json));
         input.clear('keyboard');
         lastInput = null;
         redraw = true;
@@ -543,28 +513,18 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
           () => {
             redraw = true;
             fieldStill = false;
-            ui!.toast(
-              `Loaded runtime state ${slot}`,
-            );
+            ui!.toast(S.game.runtimeLoaded(slot));
           },
           (error: unknown) => {
             ui!.toast(
-              `State ${slot} loaded, but its field renderer failed: ${
-                error instanceof Error
-                  ? error.message
-                  : String(error)
-              }`,
+              S.game.runtimeRenderFailed(slot, error instanceof Error ? error.message : String(error)),
               6000,
             );
           },
         );
       } catch (error) {
         ui!.toast(
-          `State ${slot} was not loaded: ${
-            error instanceof Error
-              ? error.message
-              : String(error)
-          }`,
+          S.game.runtimeLoadFailed(slot, error instanceof Error ? error.message : String(error)),
           6000,
         );
       }
@@ -1033,7 +993,11 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     }
   });
   // Leaving for good (not into the back/forward cache): close the save database's connection.
-  addEventListener('pagehide', (e) => !e.persisted && saves.close());
+  addEventListener('pagehide', (e) => {
+    if (e.persisted) return;
+    saves.close();
+    runtimeSlots.close();
+  });
   const loopTick = () => {
     watch.tick();
     const battleHold = battle.holding();
