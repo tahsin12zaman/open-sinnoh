@@ -538,8 +538,25 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
         lastInput = null;
         redraw = true;
         fieldStill = false;
-        ui!.toast(
-          `Loaded runtime state ${slot}`,
+
+        void session.remountRenderer().then(
+          () => {
+            redraw = true;
+            fieldStill = false;
+            ui!.toast(
+              `Loaded runtime state ${slot}`,
+            );
+          },
+          (error: unknown) => {
+            ui!.toast(
+              `State ${slot} loaded, but its field renderer failed: ${
+                error instanceof Error
+                  ? error.message
+                  : String(error)
+              }`,
+              6000,
+            );
+          },
         );
       } catch (error) {
         ui!.toast(

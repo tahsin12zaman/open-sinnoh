@@ -56,6 +56,8 @@ export interface Session {
   load(json: string, entry?: MapEntry): Promise<void>;
   /** New game; new names/gender, when given, are kept for later resets. */
   reset(seed: number, newGame?: NewGameOptions): Promise<void>;
+  /** Rebuilds field rendering from the current in-place game/world state. */
+  remountRenderer(): Promise<void>;
   dispose(): void;
 }
 
@@ -188,6 +190,7 @@ export async function createSession(
       game.reset(nextSeed, nextNewGame);
       await remount();
     },
+    remountRenderer: remount,
     dispose: () => renderer.dispose(),
   };
 }
