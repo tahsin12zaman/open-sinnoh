@@ -7,7 +7,6 @@
  */
 import { itemCount, type GameState, type Registries, type ScriptRunner } from '@opensinnoh/contracts';
 import type { Id } from '@opensinnoh/core';
-import { useRepel } from '@opensinnoh/services';
 
 export interface RepelPromptDeps {
   registries: Registries;
@@ -21,6 +20,27 @@ export interface RepelPromptDeps {
 export function repelPrompt(d: RepelPromptDeps) {
   let pending = false;
   return {
+    captureRuntimeSnapshot: () => ({
+      pending,
+    }),
+    restoreRuntimeSnapshot(value: unknown): void {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        Array.isArray(value) ||
+        typeof (
+          value as { pending?: unknown }
+        ).pending !== 'boolean'
+      ) {
+        throw new Error(
+          'invalid repeat-Repel runtime snapshot',
+        );
+      }
+
+      pending = (
+        value as { pending: boolean }
+      ).pending;
+    },
     /** Before the field's tick: the Repel's steps left. */
     before: () => d.state().repel,
     /** After the field's tick: whether the Repel wore off in it, and the question once its script has ended. */
@@ -34,11 +54,17 @@ export function repelPrompt(d: RepelPromptDeps) {
       if (!item || itemCount(state, item) < 1) return;
       const name = d.registries.items.get(item)?.name;
       if (name === undefined) throw new Error(`repel prompt: no item ${item}`);
-      scripts.ask(`${d.ns}:Lantern_Repel_UseAnother` as Id, [name], (yes) => {
-        if (!yes) return;
-        if (!useRepel(state, d.registries, item)) throw new Error('repel prompt: a Repel is still active');
-        scripts.notice(`${d.ns}:Bag_Text_UsedRepel` as Id, [state.names.player, name]);
-      });
+      scripts.ask(
+        `${d.ns}:Lantern_Repel_UseAnother` as Id,
+        [name],
+        {
+          kind: 'repel',
+          item,
+          usedText:
+            `${d.ns}:Bag_Text_UsedRepel` as Id,
+          itemName: name,
+        },
+      );
     },
   };
 }

@@ -120,6 +120,15 @@ export class PlatformLift {
     return lift;
   }
 
+  restoreRuntimeSnapshot(
+    snapshot: RuntimePlatformLiftSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      PlatformLift.restore(snapshot, this.data),
+    );
+  }
+
   get config(): LiftConfig {
     return LIFTS[this.lift]!;
   }

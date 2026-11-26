@@ -1,4 +1,4 @@
-export { createScriptRunner, NATIVE_VARS, CALL_STACK_SLOTS } from './runner.ts';
+export { createScriptRunner, NATIVE_VARS, CALL_STACK_SLOTS, type Runner } from './runner.ts';
 export { classificationReport, classifyOps, CONTEST_ROUNDS_STATUS, coverage, implementedOps, m5Progress, REAL_CONTESTS, REAL_GAME_CORNER, REAL_SEALS, REAL_TOWN, REAL_GALLERY, REAL_TV, REAL_M1B, REAL_M5, REAL_P, STUBBED, type Coverage, type M5Chunk, type M5Progress, type OpClassification } from './coverage.ts';
 export { appearanceTrainerClass, calculateAppearance, newGameAppearance } from './appearance-ops.ts';
 export { BUCKETS, bucketOf, classifyOp, TRIAGE, type Bucket } from './classify.ts';

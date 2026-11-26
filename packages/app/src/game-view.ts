@@ -3,7 +3,16 @@
  * bridge and the menu (saves, mods, storage).
  */
 import { BUTTONS, DEFAULT_CLOCK, type Button, type ClockTime } from '@opensinnoh/core';
-import { DEFAULT_DEVICE_OPTIONS, PANEL_HEIGHT, PANEL_WIDTH, type GameState, type InputFrame, type SaveEnvelope } from '@opensinnoh/contracts';
+import {
+  CONTRACTS_VERSION,
+  DEFAULT_DEVICE_OPTIONS,
+  PANEL_HEIGHT,
+  PANEL_WIDTH,
+  type GameState,
+  type InputFrame,
+  type RuntimeSnapshot,
+  type SaveEnvelope,
+} from '@opensinnoh/contracts';
 import { IndexedDbSaveStore, PackMismatchError, saveFromJson, saveToJson, TEXT_FRAME_DELAY, validateSave, type Game, type NewGameOptions, type TextSpeedOption } from '@opensinnoh/game';
 import {
   exportPlatinumSaveState,
@@ -52,6 +61,15 @@ import { reportsAnswered } from './telemetry/settings.ts';
 import { readAnswered, storeAnswered, type SetupQuestion } from './title/setup.ts';
 import { fieldScale, readZoom, stepZoom, storeZoom, WheelSteps, zoomChoices, zoomLabel, type Zoom } from './zoom.ts';
 import { S } from './strings/index.ts';
+import type { Runner } from '@opensinnoh/vm';
+import {
+  RuntimeSnapshotCoordinator,
+  audioSnapshotParticipant,
+  gameSnapshotParticipant,
+  ownedSnapshotParticipant,
+  scriptRunnerSnapshotParticipant,
+  worldSnapshotParticipant,
+} from './runtime-snapshot.ts';
 
 declare global {
   interface Window {
@@ -233,6 +251,7 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
   // chunk away before the first battle (its failure shows at that battle).
   else void session.game.loadBattleEngine().then(() => warmBattleEngine(session.game), () => {});
   let ticks = 0;
+  let runtimeTicking = false;
   /** The last tick did not step the field (a menu or app over it): it is drawn at its last tick. */
   let fieldStill = false;
   let lastInput: InputFrame | null = null;
@@ -378,6 +397,173 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     fullscreen: fullscreen && { toggle: () => void fullscreen.run().catch((e: Error) => ui!.notice(S.game.fullscreenFailed(e.message))), active: fullscreen.active },
     replay: opts.replay,
   });
+  const runtimeCompatibility = {
+    build: [
+      CONTRACTS_VERSION,
+      ...session.game.loadOrder.map(
+        (pack) => `${pack.id}@${pack.version}`,
+      ),
+    ].join('|'),
+    contracts: CONTRACTS_VERSION,
+  };
+  const runtimeCoordinator =
+    new RuntimeSnapshotCoordinator({
+      compatibility: runtimeCompatibility,
+      boundary: {
+        atTickBoundary: (operation) => {
+          if (runtimeTicking) {
+            throw new Error(
+              'Runtime state is between tick boundaries.',
+            );
+          }
+
+          return operation(
+            session.game.state.tick,
+          );
+        },
+      },
+      participants: [
+        gameSnapshotParticipant(session.game),
+        worldSnapshotParticipant(
+          session.game.world,
+        ),
+        scriptRunnerSnapshotParticipant(
+          session.game.scripts as Runner,
+        ),
+        ownedSnapshotParticipant('apps'),
+        ownedSnapshotParticipant('battle'),
+        audioSnapshotParticipant(session.game),
+        ownedSnapshotParticipant('render'),
+      ],
+      references: () => ({
+        actors: [
+          ...new Set(
+            session.game.state.objects
+              .map((actor) => actor.localId)
+              .filter((id) => id >= 0),
+          ),
+        ],
+        threads: [],
+      }),
+    });
+  const runtimeSlots:
+    (RuntimeSnapshot | null)[] =
+      Array<RuntimeSnapshot | null>(10)
+        .fill(null);
+  let pageUpHeld = false;
+  const runtimeSlot = (
+    code: string,
+  ): number | null => {
+    const match =
+      /^(?:Digit|Numpad)([0-9])$/.exec(code);
+
+    return match ? Number(match[1]) : null;
+  };
+
+  if (!opts.replay) {
+    addEventListener('keydown', (event) => {
+      if (
+        root.hidden ||
+        titleActive ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.repeat ||
+        event.isComposing
+      ) {
+        return;
+      }
+
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest(
+          'input, textarea, select, dialog',
+        )
+      ) {
+        return;
+      }
+
+      if (event.code === 'PageUp') {
+        pageUpHeld = true;
+        event.preventDefault();
+        return;
+      }
+
+      const slot = runtimeSlot(event.code);
+
+      if (slot === null) {
+        return;
+      }
+
+      if (event.altKey) {
+        event.preventDefault();
+
+        try {
+          runtimeSlots[slot] =
+            runtimeCoordinator.capture();
+          ui!.toast(
+            `Saved runtime state ${slot}`,
+          );
+        } catch (error) {
+          ui!.toast(
+            `State ${slot} was not saved: ${
+              error instanceof Error
+                ? error.message
+                : String(error)
+            }`,
+            6000,
+          );
+        }
+
+        return;
+      }
+
+      if (!pageUpHeld || event.altKey) {
+        return;
+      }
+
+      event.preventDefault();
+      const snapshot = runtimeSlots[slot];
+
+      if (!snapshot) {
+        ui!.toast(
+          `Runtime state ${slot} is empty`,
+        );
+        return;
+      }
+
+      try {
+        ticks =
+          runtimeCoordinator.restore(snapshot);
+        input.clear('keyboard');
+        lastInput = null;
+        redraw = true;
+        fieldStill = false;
+        ui!.toast(
+          `Loaded runtime state ${slot}`,
+        );
+      } catch (error) {
+        ui!.toast(
+          `State ${slot} was not loaded: ${
+            error instanceof Error
+              ? error.message
+              : String(error)
+          }`,
+          6000,
+        );
+      }
+    });
+
+    addEventListener('keyup', (event) => {
+      if (event.code === 'PageUp') {
+        pageUpHeld = false;
+      }
+    });
+
+    addEventListener('blur', () => {
+      pageUpHeld = false;
+    });
+  }
+
   if (device.problem) {
     session.game.log.stub('ui:options-reset', `stored options were invalid (${device.problem}); reset to the defaults`);
     ui.notice(S.game.optionsReset(device.problem));
@@ -444,7 +630,14 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     if (import.meta.env.DEV && recorder) recorder.frame(lastInput, session.game);
     const world = session.game.world;
     const steps = world.steps();
-    session.tick(lastInput);
+    runtimeTicking = true;
+
+    try {
+      session.tick(lastInput);
+    } finally {
+      runtimeTicking = false;
+    }
+
     fieldStill = session.game.world === world && world.steps() === steps;
     if (!opts.replay) suspend.tick();
     if (import.meta.env.DEV && recorder) recorder.observe(session.game);

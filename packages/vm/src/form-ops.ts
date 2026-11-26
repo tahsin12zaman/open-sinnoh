@@ -101,10 +101,11 @@ export function formHandlers(r: Runner): Record<string, Handler> {
       partyMon('open_summary_screen_teach_move', slot);
       const move = bySource(r.registries, 'moves', val(t, a[1]));
       if (!move) throw new Error(`open_summary_screen_teach_move: no move ${val(t, a[1])}`);
-      return r.openApp(c, { app: 'summary-teach', slot, move }, (result) => {
-        if (result.app !== 'summary-teach') throw new Error(`open_summary_screen_teach_move: got a ${result.app} result`);
-        r.opState.formSummaryPick = result.forget;
-      });
+      return r.openApp(
+        c,
+        { app: 'summary-teach', slot, move },
+        { kind: 'op-state', target: 'formSummaryPick' },
+      );
     },
     /** ScrCmd_GetSummarySelectedMoveSlot: the move slot picked, LEARNED_MOVES_MAX for none. TRUE. */
     get_summary_selected_move_slot: (t, _c, a) => {
@@ -121,11 +122,23 @@ export function formHandlers(r: Runner): Record<string, Handler> {
      */
     open_shaymin_tablet_naming_screen: (t, c, a) => {
       const v = r.ref(a[0], 'var');
-      return r.openApp(c, { app: 'naming', kind: 'tablet', initial: '', maxLength: TABLET_NAME_LENGTH, gender: r.state.gender, pokemon: null }, (result) => {
-        if (result.app !== 'naming') throw new Error(`open_shaymin_tablet_naming_screen: got a ${result.app} result`);
-        if (result.name !== null) r.state.tabletName = result.name;
-        r.setVar(t, v, result.name === null ? NAMING_NO_INPUT : NAMING_OK);
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'naming',
+          kind: 'tablet',
+          initial: '',
+          maxLength: TABLET_NAME_LENGTH,
+          gender: r.state.gender,
+          pokemon: null,
+        },
+        {
+          kind: 'tablet-naming',
+          variable: v,
+          noInput: NAMING_NO_INPUT,
+          accepted: NAMING_OK,
+        },
+      );
     },
     /** ScrCmd_BufferTabletName: the tablet's word into buffer `a[0]` (empty before one is written). */
     buffer_tablet_name: (t, _c, a) => {

@@ -1,3 +1,8 @@
+import {
+  captureFrontierServiceRuntime,
+  restoreFrontierServiceRuntime,
+  type FrontierServiceRuntimeSnapshot,
+} from './frontier-runtime.ts';
 /**
  * The Battle Factory's rules (decomp overlay 104 battle_factory.c, battle_factory_helpers.c, frscrcmd_battle_factory.c;
  * arm9 battle_factory_save.c, scrcmd_battle_factory.c). Headless and deterministic: the frontier VM's Factory commands
@@ -150,6 +155,11 @@ export function factoryTrainerFor(t: BattleFactoryTables, rand: Rand16, challeng
  * One Battle Factory challenge (decomp BattleFactory): alive from the frontier's InitBattleFactory to FreeBattleFactory.
  * Not saved itself: `save` writes its resumable part to `FrontierState.factory.save`.
  */
+export type BattleFactoryRuntimeSnapshot =
+  FrontierServiceRuntimeSnapshot<
+    'battle-factory'
+  >;
+
 export class BattleFactory {
   readonly challengeType: number;
   readonly openLevel: boolean;
@@ -209,6 +219,26 @@ export class BattleFactory {
   /** Decomp BattleFactory_Init(saveData, resumingFromSave, challengeType, isOpenLevel). `otName` is the rentals' OT. */
   static init(state: GameState, registries: Registries, rand: Rand16, otName: string, resume: boolean, challengeType: number, openLevel: boolean): BattleFactory {
     return new BattleFactory(state, registries, rand, otName, resume, challengeType, openLevel);
+  }
+
+  captureRuntimeSnapshot(): BattleFactoryRuntimeSnapshot {
+    return captureFrontierServiceRuntime(
+      this,
+      'battle-factory',
+      ['state', 'registries', 'rand'],
+    );
+  }
+
+  static restoreRuntimeSnapshot(
+    state: GameState, registries: Registries, rand: Rand16,
+    value: unknown,
+  ): BattleFactory {
+    return restoreFrontierServiceRuntime(
+      BattleFactory.prototype,
+      { state, registries, rand },
+      value,
+      'battle-factory',
+    );
   }
 
   private get tables(): FrontierTables {

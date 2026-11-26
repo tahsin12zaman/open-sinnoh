@@ -18,6 +18,53 @@ export interface ViewMatrix {
   t: [number, number, number];
 }
 
+export interface ParticleCameraRuntimeSnapshot {
+  position: Vec;
+  target: Vec;
+  up: Vec;
+  angle: [number, number, number];
+  projection: number;
+}
+
+const cameraVector = (
+  value: unknown,
+): value is Vec =>
+  Array.isArray(value) &&
+  value.length === 3 &&
+  value.every(
+    (part) =>
+      typeof part === 'number' &&
+      Number.isFinite(part),
+  );
+
+export function validateParticleCameraRuntimeSnapshot(
+  value: unknown,
+): value is ParticleCameraRuntimeSnapshot {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const snapshot = value as Record<
+    string,
+    unknown
+  >;
+
+  return (
+    cameraVector(snapshot.position) &&
+    cameraVector(snapshot.target) &&
+    cameraVector(snapshot.up) &&
+    cameraVector(snapshot.angle) &&
+    (
+      snapshot.projection === 0 ||
+      snapshot.projection === 1
+    )
+  );
+}
+
 export class ParticleCamera {
   position: Vec = [0, 0, 4 * 4096];
   target: Vec = [0, 0, 0];
@@ -26,6 +73,36 @@ export class ParticleCamera {
   angle: [number, number, number] = [0, 0, 0];
   /** 0 perspective, 1 orthographic (decomp CameraProjection). */
   projection = 1;
+
+  captureRuntimeSnapshot(): ParticleCameraRuntimeSnapshot {
+    return {
+      position: [...this.position],
+      target: [...this.target],
+      up: [...this.up],
+      angle: [...this.angle],
+      projection: this.projection,
+    };
+  }
+
+  restoreRuntimeSnapshot(
+    value: unknown,
+  ): void {
+    if (
+      !validateParticleCameraRuntimeSnapshot(
+        value,
+      )
+    ) {
+      throw new Error(
+        'Invalid particle camera runtime snapshot.',
+      );
+    }
+
+    this.position = [...value.position];
+    this.target = [...value.target];
+    this.up = [...value.up];
+    this.angle = [...value.angle];
+    this.projection = value.projection;
+  }
 
   /** Camera_SetAngleAroundTarget. */
   setAngleAroundTarget(angle: [number, number, number]): void {

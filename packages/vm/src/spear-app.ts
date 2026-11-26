@@ -8,6 +8,47 @@ export function cameraTranslation(delta: number, calls: number): number {
   return (Math.trunc((delta * FX) / calls) * (calls - 1)) / FX;
 }
 
+export interface SpearPillarApplicationRuntimeSnapshot {
+  kind: 'spear-pillar-application';
+  tick: number;
+  messageDoneAt: number[];
+  data: SpearPillarAssets;
+}
+
+export function validateSpearPillarApplicationRuntimeSnapshot(
+  value: unknown,
+): value is SpearPillarApplicationRuntimeSnapshot {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const snapshot = value as Record<
+    string,
+    unknown
+  >;
+
+  return (
+    snapshot.kind ===
+      'spear-pillar-application' &&
+    Number.isSafeInteger(snapshot.tick) &&
+    (snapshot.tick as number) >= 0 &&
+    Array.isArray(snapshot.messageDoneAt) &&
+    snapshot.messageDoneAt.every(
+      (tick) =>
+        Number.isSafeInteger(tick) &&
+        tick >= 0 &&
+        tick <= (snapshot.tick as number),
+    ) &&
+    typeof snapshot.data === 'object' &&
+    snapshot.data !== null &&
+    !Array.isArray(snapshot.data)
+  );
+}
+
 /** An awaited application: printer and animation endpoints gate its three resource lifetimes. */
 export class SpearPillarApplication {
   private actors = new Map<string, StoryActor & { speed: number; loop: boolean }>();
@@ -22,6 +63,9 @@ export class SpearPillarApplication {
   private feedback = false;
   private scanline = 0;
   private readonly task: Generator<void>;
+  private messageDoneAt: number[] = [];
+  private replayMessageDoneAt:
+    Set<number> | null = null;
   constructor(
     private readonly r: Runner,
     private readonly thread: Thread,
@@ -31,7 +75,92 @@ export class SpearPillarApplication {
     this.thread.slots[0] = r.state.names.player;
     this.task = this.run();
   }
+  captureRuntimeSnapshot(): SpearPillarApplicationRuntimeSnapshot {
+    return {
+      kind: 'spear-pillar-application',
+      tick: this.tick,
+      messageDoneAt: [
+        ...this.messageDoneAt,
+      ],
+      data: structuredClone(this.data),
+    };
+  }
+
+  static fromRuntimeSnapshot(
+    runner: Runner,
+    thread: Thread,
+    value: unknown,
+  ): SpearPillarApplication {
+    if (
+      !validateSpearPillarApplicationRuntimeSnapshot(
+        value,
+      )
+    ) {
+      throw new Error(
+        'Invalid Spear Pillar application runtime snapshot.',
+      );
+    }
+
+    const application =
+      new SpearPillarApplication(
+        runner,
+        thread,
+        structuredClone(value.data),
+      );
+
+    application.replayMessageDoneAt =
+      new Set(value.messageDoneAt);
+
+    for (
+      let tick = 0;
+      tick < value.tick;
+      tick++
+    ) {
+      if (application.step()) {
+        throw new Error(
+          'Spear Pillar application ended before its saved tick.',
+        );
+      }
+    }
+
+    application.replayMessageDoneAt = null;
+    application.messageDoneAt = [
+      ...value.messageDoneAt,
+    ];
+
+    return application;
+  }
+
   step(): boolean {
+    if (
+      this.replayMessageDoneAt?.has(
+        this.tick,
+      )
+    ) {
+      const printer =
+        this.r.ui.message?.printer;
+
+      if (printer) {
+        for (
+          let step = 0;
+          step < 100_000 &&
+          !printer.done;
+          step++
+        ) {
+          printer.subStep({
+            pressed: true,
+            held: true,
+          });
+        }
+
+        if (!printer.done) {
+          throw new Error(
+            'Spear Pillar replay could not complete its historical message.',
+          );
+        }
+      }
+    }
+
     for (const a of this.actors.values()) {
       const frames = this.data.models[a.asset]!.frames;
       a.tick = a.loop ? (a.tick + a.speed) % frames : Math.min(frames - 1, a.tick + a.speed);
@@ -92,6 +221,14 @@ export class SpearPillarApplication {
   private *print(index: number): Generator<void> {
     const printer = this.r.showMessage(this.thread, this.data.messages[index]!, this.r.textSpeed());
     while (!printer.done) yield;
+
+    if (
+      !this.replayMessageDoneAt &&
+      !this.messageDoneAt.includes(this.tick)
+    ) {
+      this.messageDoneAt.push(this.tick);
+    }
+
     this.r.ui.message = null;
   }
   private *pan(delta: number, n: number, axis: 0 | 1 | 2 = 2): Generator<void> {

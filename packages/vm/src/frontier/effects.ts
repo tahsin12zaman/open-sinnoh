@@ -2,12 +2,85 @@
  * A frontier scene's effects, headless: its SPL particle systems (decomp frontier_particle_system.c, on the battle's SPL
  * port) and a Frontier Brain's cut-in (frontier_brain_encounter_effect.c). Both step once per scene frame.
  */
-import { ParticleCamera, ParticleManager, type Emitter, type SplRandom } from '@opensinnoh/battle/particles';
+import {
+  ParticleCamera,
+  ParticleManager,
+  validateParticleManagerRuntimeSnapshot,
+  type Emitter,
+  type ParticleManagerRuntimeSnapshot,
+  type SplRandom,
+} from '@opensinnoh/battle/particles';
 import type { AnimParticle, FrontierBrainCutInView, FrontierBrainFacility, FrontierEffectsArt, ParticleSystem, Ui2dAnimation } from '@opensinnoh/contracts';
 import type { Id } from '@opensinnoh/core';
 
 /** Decomp NUM_FRONTIER_PARTICLE_SYSTEMS. */
 const SYSTEMS = 8;
+
+export interface FrontierParticlesRuntimeSnapshot {
+  kind: 'frontier-particles';
+  rngState: number;
+  systems: (
+    | {
+        narcIdx: number;
+        manager: ParticleManagerRuntimeSnapshot;
+      }
+    | null
+  )[];
+  drawn: AnimParticle[];
+}
+
+export function validateFrontierParticlesRuntimeSnapshot(
+  value: unknown,
+): value is FrontierParticlesRuntimeSnapshot {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+
+  const snapshot = value as Record<
+    string,
+    unknown
+  >;
+
+  if (
+    snapshot.kind !== 'frontier-particles' ||
+    !Number.isSafeInteger(snapshot.rngState) ||
+    (snapshot.rngState as number) < 0 ||
+    (snapshot.rngState as number) > 0xffffffff ||
+    !Array.isArray(snapshot.systems) ||
+    snapshot.systems.length !== SYSTEMS ||
+    !Array.isArray(snapshot.drawn)
+  ) {
+    return false;
+  }
+
+  return snapshot.systems.every((entry) => {
+    if (entry === null) return true;
+
+    if (
+      typeof entry !== 'object' ||
+      Array.isArray(entry)
+    ) {
+      return false;
+    }
+
+    const system = entry as Record<
+      string,
+      unknown
+    >;
+
+    return (
+      Number.isSafeInteger(system.narcIdx) &&
+      (system.narcIdx as number) >= 0 &&
+      validateParticleManagerRuntimeSnapshot(
+        system.manager,
+      )
+    );
+  });
+}
 
 /** Decomp FrontierParticleSystem: up to 8 particle systems, drawn then updated each frame (FrontierParticleSystem_Update). */
 export class FrontierParticles {
@@ -19,6 +92,74 @@ export class FrontierParticles {
     private readonly rng: SplRandom,
     private readonly systemOf: (narcIdx: number) => ParticleSystem,
   ) {}
+
+  captureRuntimeSnapshot(): FrontierParticlesRuntimeSnapshot {
+    return {
+      kind: 'frontier-particles',
+      rngState: this.rng.state,
+      systems: this.systems.map(
+        (manager) => {
+          if (!manager) return null;
+
+          const narcIdx =
+            manager.system.sourceIndex;
+
+          if (narcIdx === undefined) {
+            throw new Error(
+              `Frontier particle system ${manager.system.id} has no source index.`,
+            );
+          }
+
+          return {
+            narcIdx,
+            manager:
+              manager.captureRuntimeSnapshot(),
+          };
+        },
+      ),
+      drawn: structuredClone(this.drawn),
+    };
+  }
+
+  restoreRuntimeSnapshot(
+    value: unknown,
+  ): void {
+    if (
+      !validateFrontierParticlesRuntimeSnapshot(
+        value,
+      )
+    ) {
+      throw new Error(
+        'Invalid Frontier particles runtime snapshot.',
+      );
+    }
+
+    this.rng.state = value.rngState;
+
+    value.systems.forEach(
+      (entry, index) => {
+        if (!entry) {
+          this.systems[index] = null;
+          return;
+        }
+
+        const manager = new ParticleManager(
+          this.systemOf(entry.narcIdx),
+          new ParticleCamera(),
+          this.rng,
+        );
+
+        manager.restoreRuntimeSnapshot(
+          entry.manager,
+        );
+
+        this.systems[index] = manager;
+      },
+    );
+
+    this.rng.state = value.rngState;
+    this.drawn = structuredClone(value.drawn);
+  }
 
   /** FrontierParticleSystem_NewParticleSystem: `projection` 1 orthographic (every script's), 0 perspective. */
   init(index: number, narcIdx: number, projection: number): void {
@@ -66,6 +207,137 @@ const VS_AT = { x: 72, y: 82 };
 const MUGSHOT = { y: 80, from: 256, to: 208, step: 3840 } as const;
 const NAME_AT = { x: 208 - 92, y: 11 * 8 - 8 };
 
+interface LerpRuntimeSnapshot {
+  start: number;
+  delta: number;
+  steps: number;
+  step: number;
+  value: number;
+}
+
+export interface BrainCutInRuntimeSnapshot {
+  kind: 'frontier-brain-cut-in';
+  facility: FrontierBrainFacility;
+  state: number;
+  delay: number;
+  bannerIndex: number;
+  banner: {
+    top: number;
+    bottom: number;
+    open: boolean;
+    finished: boolean;
+  } | null;
+  vs: {
+    lerp: LerpRuntimeSnapshot;
+    drawn: boolean;
+  }[];
+  vsDelay: number;
+  vsStarted: number;
+  mugshot: {
+    x: number;
+    slid: boolean;
+  } | null;
+  lit: boolean;
+  finished: boolean;
+}
+
+const runtimeRecord = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value);
+
+const runtimeInteger = (
+  value: unknown,
+): value is number =>
+  typeof value === 'number' &&
+  Number.isSafeInteger(value);
+
+const runtimeNumber = (
+  value: unknown,
+): value is number =>
+  typeof value === 'number' &&
+  Number.isFinite(value);
+
+const runtimeLerp = (
+  value: unknown,
+): value is LerpRuntimeSnapshot =>
+  runtimeRecord(value) &&
+  runtimeNumber(value.start) &&
+  runtimeNumber(value.delta) &&
+  runtimeInteger(value.steps) &&
+  value.steps > 0 &&
+  runtimeInteger(value.step) &&
+  value.step >= 0 &&
+  value.step <= value.steps &&
+  runtimeNumber(value.value);
+
+export function validateBrainCutInRuntimeSnapshot(
+  value: unknown,
+): value is BrainCutInRuntimeSnapshot {
+  if (
+    !runtimeRecord(value) ||
+    value.kind !== 'frontier-brain-cut-in' ||
+    ![
+      'tower',
+      'factory',
+      'castle',
+      'hall',
+      'arcade',
+    ].includes(value.facility as string) ||
+    !runtimeInteger(value.state) ||
+    value.state < 0 ||
+    value.state > 18 ||
+    !runtimeInteger(value.delay) ||
+    !runtimeInteger(value.bannerIndex) ||
+    value.bannerIndex < 0 ||
+    value.bannerIndex >= BANNER.palettes ||
+    !Array.isArray(value.vs) ||
+    value.vs.length !== 4 ||
+    !value.vs.every(
+      (entry) =>
+        runtimeRecord(entry) &&
+        runtimeLerp(entry.lerp) &&
+        typeof entry.drawn === 'boolean',
+    ) ||
+    !runtimeInteger(value.vsDelay) ||
+    !runtimeInteger(value.vsStarted) ||
+    value.vsStarted < 0 ||
+    value.vsStarted > 4 ||
+    typeof value.lit !== 'boolean' ||
+    typeof value.finished !== 'boolean'
+  ) {
+    return false;
+  }
+
+  if (
+    value.banner !== null &&
+    (
+      !runtimeRecord(value.banner) ||
+      !runtimeNumber(value.banner.top) ||
+      !runtimeNumber(value.banner.bottom) ||
+      typeof value.banner.open !== 'boolean' ||
+      typeof value.banner.finished !== 'boolean'
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    value.mugshot !== null &&
+    (
+      !runtimeRecord(value.mugshot) ||
+      !runtimeNumber(value.mugshot.x) ||
+      typeof value.mugshot.slid !== 'boolean'
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 /** LinearInterpolationTaskFX32 (the VS sprites' scale, fx32). */
 class Lerp {
   value: number;
@@ -77,6 +349,30 @@ class Lerp {
   ) {
     this.value = start;
   }
+  captureRuntimeSnapshot(): LerpRuntimeSnapshot {
+    return {
+      start: this.start,
+      delta: this.delta,
+      steps: this.steps,
+      step: this.step,
+      value: this.value,
+    };
+  }
+
+  static restoreRuntimeSnapshot(
+    snapshot: LerpRuntimeSnapshot,
+  ): Lerp {
+    const lerp = new Lerp(
+      snapshot.start,
+      snapshot.delta,
+      snapshot.steps,
+    );
+
+    lerp.step = snapshot.step;
+    lerp.value = snapshot.value;
+    return lerp;
+  }
+
   /** LinearInterpolationTaskFX32_Update: true once it has reached its end. */
   update(): boolean {
     this.value = this.start + Math.trunc((this.delta * this.step) / this.steps);
@@ -247,6 +543,72 @@ export class BrainCutIn {
     m.x = Math.max(m.x - MUGSHOT.step, MUGSHOT.to << 8);
     if (m.x === MUGSHOT.to << 8) m.slid = true;
     return false;
+  }
+
+  captureRuntimeSnapshot(): BrainCutInRuntimeSnapshot {
+    return {
+      kind: 'frontier-brain-cut-in',
+      facility: this.facility,
+      state: this.state,
+      delay: this.delay,
+      bannerIndex: this.bannerIndex,
+      banner: this.banner
+        ? { ...this.banner }
+        : null,
+      vs: this.vs.map((entry) => ({
+        lerp:
+          entry.lerp.captureRuntimeSnapshot(),
+        drawn: entry.drawn,
+      })),
+      vsDelay: this.vsDelay,
+      vsStarted: this.vsStarted,
+      mugshot: this.mugshot
+        ? { ...this.mugshot }
+        : null,
+      lit: this.lit,
+      finished: this.finished,
+    };
+  }
+
+  static restoreRuntimeSnapshot(
+    value: unknown,
+    host: BrainCutInHost,
+  ): BrainCutIn {
+    if (!validateBrainCutInRuntimeSnapshot(value)) {
+      throw new Error(
+        'Invalid Frontier Brain cut-in runtime snapshot.',
+      );
+    }
+
+    const cutIn = new BrainCutIn(
+      value.facility,
+      host,
+    );
+
+    cutIn.state = value.state;
+    cutIn.delay = value.delay;
+    cutIn.bannerIndex = value.bannerIndex;
+    cutIn.banner = value.banner
+      ? { ...value.banner }
+      : null;
+    cutIn.vsDelay = value.vsDelay;
+    cutIn.vsStarted = value.vsStarted;
+    cutIn.mugshot = value.mugshot
+      ? { ...value.mugshot }
+      : null;
+    cutIn.lit = value.lit;
+    cutIn.finished = value.finished;
+
+    value.vs.forEach((entry, index) => {
+      cutIn.vs[index] = {
+        lerp: Lerp.restoreRuntimeSnapshot(
+          entry.lerp,
+        ),
+        drawn: entry.drawn,
+      };
+    });
+
+    return cutIn;
   }
 
   view(art: FrontierEffectsArt, name: string, animationsOf: (sheet: Id) => readonly Ui2dAnimation[]): FrontierBrainCutInView {

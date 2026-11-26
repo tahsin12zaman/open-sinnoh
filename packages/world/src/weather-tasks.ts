@@ -19,6 +19,30 @@ import type { FieldSound } from './sound.ts';
 const LOOPS: Record<number, string> = { 2: 'SEQ_SE_DP_T_AME', 3: 'SEQ_SE_DP_T_OOAME', 4: 'SEQ_SE_DP_T_OOAME' };
 const THUNDERSTORM = 4;
 
+export interface LightningRuntimeSnapshot {
+  wait: number;
+  phase: 0 | 1 | 2;
+  level: number;
+  rise: number;
+  fall: number;
+  ticks: number;
+  seed: number;
+}
+
+export interface WeatherTasksRuntimeSnapshot {
+  shown: Weather | null;
+  next: {
+    weather: Weather;
+    t: number;
+    out: number;
+    wait: number;
+  } | null;
+  loop: string | null;
+  lightning: LightningRuntimeSnapshot | null;
+  loads: number;
+  field: boolean;
+}
+
 export class WeatherTasks {
   /** The weather whose task runs (fading in or steady); null while one fades out or none is shown. */
   private shown: Weather | null = null;
@@ -30,6 +54,42 @@ export class WeatherTasks {
   private field = false;
 
   constructor(private readonly sound: FieldSound) {}
+
+  capture(): WeatherTasksRuntimeSnapshot {
+    return structuredClone({
+      shown: this.shown,
+      next: this.next,
+      loop: this.loop,
+      lightning: this.lightning?.capture() ?? null,
+      loads: this.loads,
+      field: this.field,
+    });
+  }
+
+  static restore(
+    sound: FieldSound,
+    snapshot: WeatherTasksRuntimeSnapshot,
+  ): WeatherTasks {
+    const tasks = new WeatherTasks(sound);
+    tasks.shown = structuredClone(snapshot.shown);
+    tasks.next = structuredClone(snapshot.next);
+    tasks.loop = snapshot.loop;
+    tasks.lightning = snapshot.lightning
+      ? Lightning.restore(snapshot.lightning)
+      : null;
+    tasks.loads = snapshot.loads;
+    tasks.field = snapshot.field;
+    return tasks;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: WeatherTasksRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      WeatherTasks.restore(this.sound, snapshot),
+    );
+  }
 
   /** One tick with the state's weather and the map load count; `field`: the field map is up (no battle or menu app). */
   step(weather: Weather, loads: number, field: boolean): void {
@@ -100,16 +160,6 @@ export class WeatherTasks {
 }
 
 /** The lightning's own PRNG (xorshift32): weather rolls no game random numbers. */
-function rng(seed: number): () => number {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    return (s >>> 0) / 0x100000000;
-  };
-}
-
 /**
  * Lightning (decomp weather task 17, ov5_021DA748): idle a random while, then the BG flash brightens over 2 ticks by
  * 200–680 per tick and fades by 36 (a long flash, SEQ_SE_DP_T_KAMI2) or 200 (a short one, SEQ_SE_DP_T_KAMI) per tick;
@@ -122,11 +172,46 @@ export class Lightning {
   private rise = 0;
   private fall = 0;
   private ticks = 0;
-  private readonly random = rng(0x7a11);
+  private seed = 0x7a11;
+
+  capture(): LightningRuntimeSnapshot {
+    return {
+      wait: this.wait,
+      phase: this.phase,
+      level: this.level,
+      rise: this.rise,
+      fall: this.fall,
+      ticks: this.ticks,
+      seed: this.seed,
+    };
+  }
+
+  static restore(
+    snapshot: LightningRuntimeSnapshot,
+  ): Lightning {
+    const lightning = new Lightning();
+    lightning.wait = snapshot.wait;
+    lightning.phase = snapshot.phase;
+    lightning.level = snapshot.level;
+    lightning.rise = snapshot.rise;
+    lightning.fall = snapshot.fall;
+    lightning.ticks = snapshot.ticks;
+    lightning.seed = snapshot.seed >>> 0 || 1;
+    return lightning;
+  }
+
+  private nextRandom(): number {
+    let seed = this.seed >>> 0 || 1;
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    this.seed = seed >>> 0;
+    return this.seed / 0x100000000;
+  }
 
   /** One tick; a flash that starts now says which. */
   step(): 'long' | 'short' | null {
-    const r = this.random;
+    const r = () => this.nextRandom();
     if (this.phase === 0) {
       if (this.wait-- > 0) return null;
       this.phase = 1;

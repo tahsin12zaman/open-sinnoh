@@ -139,10 +139,18 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
         break;
       case CA_LOBBY.selectPokemon:
         if (arg > 1) throw new Error(`${name} SELECT_POKEMON: the multi challenge needs a link partner`);
-        return r.openApp(c, { app: 'party-order', count: CASTLE.partySize, castle: true }, (result) => {
-          if (result.app !== 'party-order') throw new Error(`${name} SELECT_POKEMON: got a ${result.app} result`);
-          r.opState.frontierCastlePicked = result.order;
-        });
+        return r.openApp(
+          c,
+          {
+            app: 'party-order',
+            count: CASTLE.partySize,
+            castle: true,
+          },
+          {
+            kind: 'op-state',
+            target: 'frontierCastlePicked',
+          },
+        );
       default:
         throw new Error(`${name}: no lobby function ${fn}`);
     }
@@ -251,10 +259,17 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
           break;
         // Decomp sub_0204A358: the party menu picking the challenge's Pokémon in order (PARTY_MENU_MODE_BATTLE_TOWER).
         case BT.openPartyMenu:
-          return r.openApp(c, { app: 'party-order', count: tower('BT_FUNC_UNK_30').partySize }, (result) => {
-            if (result.app !== 'party-order') throw new Error(`BT_FUNC_UNK_30: got a ${result.app} result`);
-            r.opState.frontierPicked = result.order;
-          });
+          return r.openApp(
+            c,
+            {
+              app: 'party-order',
+              count: tower('BT_FUNC_UNK_30').partySize,
+            },
+            {
+              kind: 'op-state',
+              target: 'frontierPicked',
+            },
+          );
         // Decomp sub_0204A378: 0 when cancelled, else the picks are the challenge's (slots, species, items).
         case BT.readPartyMenu: {
           if (r.opState.frontierPicked === undefined) throw new Error('BT_FUNC_UNK_31: no party menu has run');
@@ -357,10 +372,18 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
         // kind), its SUMMARY in the menu; the pick is read by GetBattleHallSelectedSlots.
         case BH_LOBBY.selectPokemon: {
           if (arg > 1) throw new Error('BH_LOBBY_FUNC_SELECT_POKEMON: the multi challenge needs a link partner');
-          return r.openApp(c, { app: 'party-order', count: hallPartySize(arg), hall: true }, (result) => {
-            if (result.app !== 'party-order') throw new Error(`BH_LOBBY_FUNC_SELECT_POKEMON: got a ${result.app} result`);
-            r.opState.frontierHallPicked = result.order;
-          });
+          return r.openApp(
+            c,
+            {
+              app: 'party-order',
+              count: hallPartySize(arg),
+              hall: true,
+            },
+            {
+              kind: 'op-state',
+              target: 'frontierHallPicked',
+            },
+          );
         }
         default:
           throw new Error(`call_battle_hall_lobby_function: no lobby function ${fn}`);
@@ -417,9 +440,16 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
     open_frontier_records_app: (t, c, a) => {
       const [challengeType, facility, species] = [val(t, a[0]), val(t, a[1]), val(t, a[2])];
       const id = species ? r.source('species', species)! : null;
-      return r.openApp(c, { app: 'frontier-records', challengeType, facility, species: id }, (result) => {
-        if (result.app !== 'frontier-records') throw new Error(`open_frontier_records_app: got a ${result.app} result`);
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'frontier-records',
+          challengeType,
+          facility,
+          species: id,
+        },
+        { kind: 'none' },
+      );
     },
 
     call_battle_castle_lobby_function: castleLobby('call_battle_castle_lobby_function', (type) => r.state.frontier?.castle?.active[type] === true, (type) => deleteCastleStreak(r.state, type)),
@@ -474,11 +504,11 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
       if (!entry) throw new Error(`launch_battle_frontier_scene ${scene}: the decoder gave no entry label`);
       if (r.frontier) throw new Error('launch_battle_frontier_scene: a frontier scene already runs');
       r.frontier = new FrontierRunner(r, scene, entry, () => r.tower);
-      return r.pause(c, () => {
-        if (!r.frontier?.done) return false;
-        r.frontier = null;
-        return true;
-      });
+      return r.pause(
+        c,
+        () => false,
+        { kind: 'frontier' },
+      );
     },
 
     // Decomp ScrCmd_ShowBattlePoints → FieldMenu_DrawBPWindow(left, top).
@@ -500,7 +530,7 @@ export function frontierFieldHandlers(r: Runner): Record<string, Handler> {
       if (!mart || !r.registries.marts.has(mart)) throw new Error(`poke_mart_frontier: no exchange counter ${r.int(a[0])}`);
       const greeting = r.ui.message ? r.ui.message.printer.text() : null;
       r.ui.message = null;
-      return r.openApp(c, { app: 'mart', mart, countVar: null, greeting, currency: 'bp' }, () => {});
+      return r.openApp(c, { app: 'mart', mart, countVar: null, greeting, currency: 'bp' }, { kind: 'none' });
     },
 
     // Decomp ScrCmd_JudgeStats: the total IVs, the best stat's message number in the judge's bank, and its IV.

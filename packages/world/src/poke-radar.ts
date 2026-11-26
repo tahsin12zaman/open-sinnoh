@@ -54,6 +54,18 @@ export interface RadarEncounter {
   shiny: boolean;
 }
 
+export interface PokeRadarRuntimeSnapshot {
+  shake: Shake;
+  count: number;
+  species: Id | null;
+  level: number;
+  active: boolean;
+  first: boolean;
+  fromPatch: boolean;
+  recordSlot: number;
+  patches: GrassPatch[];
+}
+
 export class PokeRadar {
   private shake: Shake = 'soft';
   private count = 0;
@@ -73,6 +85,56 @@ export class PokeRadar {
     private readonly state: { encounters?: import('@opensinnoh/core').SpecialEncounterState },
   ) {
     this.clear();
+  }
+
+  capture(): PokeRadarRuntimeSnapshot {
+    return structuredClone({
+      shake: this.shake,
+      count: this.count,
+      species: this.species,
+      level: this.level,
+      active: this.active,
+      first: this.first,
+      fromPatch: this.fromPatch,
+      recordSlot: this.recordSlot,
+      patches: this.patches,
+    });
+  }
+
+  static restore(
+    host: RadarHost,
+    tables: SpecialEncounterTables['pokeRadar'],
+    state: {
+      encounters?: import('@opensinnoh/core')
+        .SpecialEncounterState;
+    },
+    snapshot: PokeRadarRuntimeSnapshot,
+  ): PokeRadar {
+    const radar = new PokeRadar(host, tables, state);
+    radar.shake = snapshot.shake;
+    radar.count = snapshot.count;
+    radar.species = snapshot.species;
+    radar.level = snapshot.level;
+    radar.active = snapshot.active;
+    radar.first = snapshot.first;
+    radar.fromPatch = snapshot.fromPatch;
+    radar.recordSlot = snapshot.recordSlot;
+    radar.patches = structuredClone(snapshot.patches);
+    return radar;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: PokeRadarRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      PokeRadar.restore(
+        this.host,
+        this.tables,
+        this.state,
+        snapshot,
+      ),
+    );
   }
 
   /** RadarChain_Clear. */

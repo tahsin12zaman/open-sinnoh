@@ -3,6 +3,7 @@ import type { Runner } from './runner.ts';
 
 /** Field effects have a lifetime independent of the script that starts/polls them. */
 export interface SpearFieldRuntimeSnapshot {
+  data: SpearPillarAssets;
   mode: number;
   tick: number;
   terminal: boolean;
@@ -77,6 +78,7 @@ export class SpearFieldEffects {
 
   captureRuntimeSnapshot(): SpearFieldRuntimeSnapshot {
     return {
+      data: structuredClone(this.data),
       mode: this.mode,
       tick: this.tick,
       terminal: this.terminal,

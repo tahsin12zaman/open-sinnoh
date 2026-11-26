@@ -1,7 +1,11 @@
 import { fieldSystemHandlers } from './field-system-ops.ts';
 import { frontierFieldHandlers } from './frontier-field-ops.ts';
 import { FrontierRunner } from './frontier/runner.ts';
-import type { BattleTower } from '@opensinnoh/services';
+import {
+  addToGameRecord,
+  useRepel,
+  BattleTower,
+} from '@opensinnoh/services';
 /**
  * Script VM (contracts `CreateScriptRunner`). Interprets Script IR with the decomp's execution model
  * (docs/research/scripts-and-opening.md §1.6):
@@ -18,14 +22,14 @@ import type { BattleTower } from '@opensinnoh/services';
  */
 import { DAY_PERIODS, dayPeriod, type Arg, type Command, type Id, type Rng } from '@opensinnoh/core';
 import type { Button } from '@opensinnoh/core';
-import { LOCALID_FOLLOWER, newGameRecord, type AppRequest, type AppResult, type CreateScriptRunner, type Facing, type FieldHost, type GameState, type InputFrame, type Labels, type PanelView, type Registries, type ScriptRunner, type ScriptSaves, type ScriptStart, type ScriptView, type SignpostKind, type StubLog } from '@opensinnoh/contracts';
+import { LOCALID_FOLLOWER, journalEvent, journalMart, newGameRecord, saveTvSegment, type AppRequest, type AppResult, type CreateScriptRunner, type Facing, type FieldHost, type GameState, type InputFrame, type Labels, type PanelView, type Registries, type RuntimeJsonValue, type RuntimeQuestion, type ScriptRunner, type ScriptSaves, type ScriptStart, type ScriptView, type SignpostKind, type StubLog } from '@opensinnoh/contracts';
 import { TEXT_SPEED, TextPrinter, hitChoice, plainMarkup, toPrintOps } from '@opensinnoh/text';
 import { classifyOp, stubDefault } from './classify.ts';
 import { COMMAND_BY_NAME, CONDITIONS } from './commands.ts';
 import {
   NO_ALT_TEXT,
   type MenuKind,
-  type ScriptMenu,
+  ScriptMenu,
 } from './menu.ts';
 import { BANKS, m1aHandlers } from './ops.ts';
 import { m1bHandlers } from './m1b-ops.ts';
@@ -62,6 +66,9 @@ import { townFieldHandlers } from './town-field-ops.ts';
 import {
   SpearFieldEffects,
 } from './spear-field.ts';
+import {
+  SpearPillarApplication,
+} from './spear-app.ts';
 import type {
   SpearPillarAssets,
 } from '@opensinnoh/contracts';
@@ -158,6 +165,9 @@ export type RuntimeWait =
       index: number;
     }
   | { kind: 'battle' }
+  | { kind: 'frontier' }
+  | { kind: 'spear-application' }
+  | { kind: 'app' }
   | {
       kind: 'eterna-clock';
       text: Id;
@@ -268,6 +278,58 @@ export interface RunnerOpState {
   } | null;
 }
 
+export type AppContinuation =
+  | { kind: 'none' }
+  | {
+      kind: 'op-state';
+      target:
+        | 'contestPick'
+        | 'daycarePick'
+        | 'formSummaryPick'
+        | 'frontierPicked'
+        | 'frontierHallPicked'
+        | 'frontierCastlePicked'
+        | 'm3aPicked'
+        | 'sideBagPick'
+        | 'sideLearned'
+        | 'sideMovePick';
+    }
+  | { kind: 'gallery-saved'; variable: Id }
+  | { kind: 'hatch-nickname'; slot: number }
+  | { kind: 'restore-field-bgm' }
+  | {
+      kind: 'pokemon-naming';
+      slot: number;
+      variable: Id;
+      speciesName: string;
+    }
+  | {
+      kind: 'tablet-naming';
+      variable: Id;
+      noInput: number;
+      accepted: number;
+    }
+  | {
+      kind: 'easy-chat';
+      resultVariable: Id;
+      wordVariables: Id[];
+    }
+  | { kind: 'never-resume'; operation: string }
+  | { kind: 'mart-journal' }
+  | {
+      kind: 'storage-journal';
+      before: string;
+      event: number;
+    }
+  | {
+      kind: 'slots-result';
+      before: number;
+      startTick: number;
+      tvCoins: number;
+      bonusRecord: number;
+      streakVariable: Id;
+    };
+
 export type Result = 'continue' | 'yield';
 export type Handler = (t: Thread, c: Context, args: Arg[]) => Result;
 
@@ -284,11 +346,103 @@ const SIGNPOST_HIDDEN = 48;
 
 export const createScriptRunner: CreateScriptRunner = (deps) => new Runner(deps);
 
+interface ContextRuntimeSnapshot {
+  label: Id;
+  pc: number;
+  stack: { label: Id; pc: number }[];
+  state: Context['state'];
+  waitState: RuntimeWait | null;
+  cmp: number;
+}
+
+interface ThreadRuntimeSnapshot {
+  label: Id;
+  zone: Id;
+  contexts: (ContextRuntimeSnapshot | null)[];
+  subActive: boolean;
+  temps: [Id, number][];
+  slots: (string | null)[];
+  lastTalked: number | null;
+  chosenStarter: number | null;
+  battleOutcome: Thread['battleOutcome'];
+  doors: [
+    number,
+    { x: number; z: number } | 'pc',
+  ][];
+  immediate: boolean;
+  trainer: ScriptStart['trainer'] | null;
+  approaching: boolean[];
+  playerStateRequest: number;
+  tasks: RuntimeThreadTask[];
+  menuVar: Id | null;
+  startMenu: boolean;
+  turnAfterHealing: Facing | null;
+}
+
+interface RunnerRuntimeSnapshot {
+  kind: 'script-runner';
+  tick: number;
+  thread: ThreadRuntimeSnapshot | null;
+  input: InputFrame;
+  lastTouch: InputFrame['touch'];
+  opState: RunnerOpState;
+  ui: {
+    message: {
+      printer: Parameters<
+        typeof TextPrinter.fromRuntimeSnapshot
+      >[0];
+      font: 'unown' | null;
+    } | null;
+    buttonWait: boolean;
+    abWait: boolean;
+    yesNo: { cursor: 0 | 1 } | null;
+    menu: Parameters<
+      typeof ScriptMenu.fromRuntimeSnapshot
+    >[0] | null;
+    signpost: Signpost | null;
+    panel: PanelView;
+    floorWindow: {
+      view: NonNullable<
+        ScriptView['floorWindow']
+      >;
+      closeVar: Id;
+    } | null;
+    moneyWindow:
+      ScriptView['moneyWindow'];
+    pokemonPreview:
+      ScriptView['pokemonPreview'];
+    bpWindow: ScriptView['bpWindow'];
+    coinWindow: ScriptView['coinWindow'];
+    saveInfo: ScriptView['saveInfo'];
+    savingIcon: boolean;
+  };
+  startMenuReady: boolean;
+  app: {
+    request: AppRequest;
+    result: AppResult | null;
+    continuation: AppContinuation | null;
+  } | null;
+  noticeOpen: boolean;
+  question: RuntimeQuestion | null;
+  abOnly: boolean;
+  tower: unknown;
+  frontier: unknown;
+  spearField: {
+    zone: Id | null;
+    state: Parameters<
+      typeof SpearFieldEffects.fromRuntimeSnapshot
+    >[2];
+  } | null;
+  spearApplication: unknown;
+}
+
 export class Runner implements ScriptRunner {
   thread: Thread | null = null;
   tick = 0;
   spearField: SpearFieldEffects | null = null;
   private spearFieldZone: Id | null = null;
+  spearApplication:
+    SpearPillarApplication | null = null;
   readonly opState: RunnerOpState = {
     sideTrade: null,
     contestFlash: null,
@@ -354,11 +508,19 @@ export class Runner implements ScriptRunner {
   /** A script that asked for the start menu has ended; the app takes the request (takeStartMenuRequest). */
   private startMenuReady = false;
   /** The menu app a script op waits on (ScriptView.app), and its result once the game calls appDone. */
-  app: { request: AppRequest; result: AppResult | null } | null = null;
+  app: {
+    request: AppRequest;
+    result: AppResult | null;
+    continuation: AppContinuation | null;
+    done: ((result: AppResult) => void) | null;
+  } | null = null;
   /** A field message outside any script (`notice`): open until A, B or the d-pad after it has printed. */
   private noticeOpen = false;
   /** A field question outside any script (`ask`): its answer, run when the YES/NO box closes. */
-  private question: ((yes: boolean) => void) | null = null;
+  private question: {
+    runtime: RuntimeQuestion | null;
+    answer: ((yes: boolean) => void) | null;
+  } | null = null;
   /** The open notice closes on A or B only (a `{ markup }` notice). */
   private abOnly = false;
   /** The Battle Tower challenge (decomp fieldSystem->battleTower), from InitBattleTower to FreeBattleTower. */
@@ -382,6 +544,599 @@ export class Runner implements ScriptRunner {
     this.handlers = this.makeHandlers();
   }
 
+  captureRuntimeSnapshot(): RuntimeJsonValue {
+    const captureContext = (
+      context: Context | null,
+    ): RuntimeJsonValue => {
+      if (!context) return null;
+
+      if (
+        context.state === 'waiting' &&
+        !context.waitState
+      ) {
+        throw new Error(
+          `VM context ${context.label} has a closure-backed wait.`,
+        );
+      }
+
+      return {
+        label: context.label,
+        pc: context.pc,
+        stack: context.stack.map((frame) => ({
+          label: frame.label,
+          pc: frame.pc,
+        })),
+        state: context.state,
+        waitState: context.waitState
+          ? structuredClone(context.waitState)
+          : null,
+        cmp: context.cmp,
+      } as RuntimeJsonValue;
+    };
+
+    if (this.app?.done) {
+      throw new Error(
+        `VM app ${this.app.request.app} has a closure-backed continuation.`,
+      );
+    }
+
+    if (this.question?.answer) {
+      throw new Error(
+        'VM field question has a closure-backed continuation.',
+      );
+    }
+
+    const thread = this.thread
+      ? {
+          label: this.thread.label,
+          zone: this.thread.zone,
+          contexts:
+            this.thread.contexts.map(
+              captureContext,
+            ),
+          subActive: this.thread.subActive,
+          temps: [...this.thread.temps].map(
+            ([id, value]) => [id, value],
+          ),
+          slots: this.thread.slots.map(
+            (slot) => slot ?? null,
+          ),
+          lastTalked:
+            this.thread.lastTalked ?? null,
+          chosenStarter:
+            this.thread.chosenStarter,
+          battleOutcome:
+            this.thread.battleOutcome,
+          doors: [...this.thread.doors].map(
+            ([tag, door]) => [
+              tag,
+              door === 'pc'
+                ? 'pc'
+                : { ...door },
+            ],
+          ),
+          immediate: this.thread.immediate,
+          trainer:
+            this.thread.trainer ?? null,
+          approaching: [
+            ...this.thread.approaching,
+          ],
+          playerStateRequest:
+            this.thread.playerStateRequest,
+          tasks: structuredClone(
+            this.thread.tasks,
+          ),
+          menuVar:
+            this.thread.menuVar ?? null,
+          startMenu:
+            this.thread.startMenu,
+          turnAfterHealing:
+            this.thread.turnAfterHealing,
+        }
+      : null;
+
+    const payload = {
+      kind: 'script-runner',
+      tick: this.tick,
+      thread,
+      input: structuredClone(this.input),
+      lastTouch:
+        structuredClone(this.lastTouch),
+      opState: structuredClone(this.opState),
+      ui: {
+        message: this.ui.message
+          ? {
+              printer:
+                this.ui.message.printer
+                  .captureRuntimeSnapshot(),
+              font:
+                this.ui.message.font ?? null,
+            }
+          : null,
+        buttonWait: this.ui.buttonWait,
+        abWait: this.ui.abWait,
+        yesNo: this.ui.yesNo
+          ? { ...this.ui.yesNo }
+          : null,
+        menu:
+          this.ui.menu
+            ?.captureRuntimeSnapshot() ??
+          null,
+        signpost: this.ui.signpost
+          ? { ...this.ui.signpost }
+          : null,
+        panel: structuredClone(this.ui.panel),
+        floorWindow: this.ui.floorWindow
+          ? {
+              view: structuredClone(
+                this.ui.floorWindow.view,
+              ),
+              closeVar:
+                this.ui.floorWindow.closeVar,
+            }
+          : null,
+        moneyWindow:
+          structuredClone(
+            this.ui.moneyWindow,
+          ),
+        pokemonPreview:
+          structuredClone(
+            this.ui.pokemonPreview,
+          ),
+        bpWindow:
+          structuredClone(this.ui.bpWindow),
+        coinWindow:
+          structuredClone(
+            this.ui.coinWindow,
+          ),
+        saveInfo:
+          structuredClone(this.ui.saveInfo),
+        savingIcon: this.ui.savingIcon,
+      },
+      startMenuReady: this.startMenuReady,
+      app: this.app
+        ? {
+            request: structuredClone(
+              this.app.request,
+            ),
+            result: structuredClone(
+              this.app.result,
+            ),
+            continuation:
+              structuredClone(
+                this.app.continuation,
+              ),
+          }
+        : null,
+      noticeOpen: this.noticeOpen,
+      question:
+        this.question?.runtime
+          ? structuredClone(
+              this.question.runtime,
+            )
+          : null,
+      abOnly: this.abOnly,
+      tower:
+        this.tower
+          ?.captureRuntimeSnapshot() ??
+        null,
+      frontier:
+        this.frontier
+          ?.captureRuntimeSnapshot() ??
+        null,
+      spearField: this.spearField
+        ? {
+            zone: this.spearFieldZone,
+            state:
+              this.spearField
+                .captureRuntimeSnapshot(),
+          }
+        : null,
+      spearApplication:
+        this.spearApplication
+          ?.captureRuntimeSnapshot() ??
+        null,
+    };
+
+    const serialized = JSON.stringify(payload);
+
+    if (serialized === undefined) {
+      throw new Error(
+        'VM runtime snapshot is not JSON data.',
+      );
+    }
+
+    return JSON.parse(
+      serialized,
+    ) as RuntimeJsonValue;
+  }
+
+  validateRuntimeSnapshot(
+    value: RuntimeJsonValue,
+  ): string | null {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      Array.isArray(value) ||
+      value.kind !== 'script-runner'
+    ) {
+      return 'Not a script-runner runtime snapshot.';
+    }
+
+    if (
+      !Number.isSafeInteger(value.tick) ||
+      (value.tick as number) < 0
+    ) {
+      return 'Script-runner tick is invalid.';
+    }
+
+    if (
+      value.thread !== null &&
+      (
+        typeof value.thread !== 'object' ||
+        Array.isArray(value.thread)
+      )
+    ) {
+      return 'Script-runner thread is invalid.';
+    }
+
+    if (
+      typeof value.ui !== 'object' ||
+      value.ui === null ||
+      Array.isArray(value.ui)
+    ) {
+      return 'Script-runner UI state is invalid.';
+    }
+
+    if (
+      typeof value.input !== 'object' ||
+      value.input === null ||
+      Array.isArray(value.input)
+    ) {
+      return 'Script-runner input state is invalid.';
+    }
+
+    return null;
+  }
+
+  restoreRuntimeSnapshot(
+    value: RuntimeJsonValue,
+  ): void {
+    const validation =
+      this.validateRuntimeSnapshot(value);
+
+    if (validation) {
+      throw new Error(validation);
+    }
+
+    const snapshot =
+      structuredClone(
+        value,
+      ) as unknown as RunnerRuntimeSnapshot;
+
+    const restoreContext = (
+      context: ContextRuntimeSnapshot | null,
+    ): Context | null => {
+      if (!context) return null;
+
+      if (
+        !Number.isSafeInteger(context.pc) ||
+        context.pc < 0 ||
+        !Number.isSafeInteger(context.cmp) ||
+        !['running', 'waiting', 'stopped'].includes(
+          context.state,
+        ) ||
+        (
+          context.state === 'waiting' &&
+          !context.waitState
+        )
+      ) {
+        throw new Error(
+          `Invalid VM context snapshot for ${context.label}.`,
+        );
+      }
+
+      const cmds = this.commands(context.label);
+
+      if (context.pc > cmds.length) {
+        throw new Error(
+          `VM context ${context.label} has invalid pc ${context.pc}.`,
+        );
+      }
+
+      return {
+        label: context.label,
+        cmds,
+        pc: context.pc,
+        stack: context.stack.map(
+          (frame) => {
+            const frameCommands =
+              this.commands(frame.label);
+
+            if (
+              !Number.isSafeInteger(frame.pc) ||
+              frame.pc < 0 ||
+              frame.pc > frameCommands.length
+            ) {
+              throw new Error(
+                `VM stack frame ${frame.label} has invalid pc ${frame.pc}.`,
+              );
+            }
+
+            return {
+              label: frame.label,
+              cmds: frameCommands,
+              pc: frame.pc,
+            };
+          },
+        ),
+        state: context.state,
+        wait: null,
+        waitState: context.waitState
+          ? structuredClone(
+              context.waitState,
+            )
+          : null,
+        cmp: context.cmp,
+      };
+    };
+
+    const thread = snapshot.thread
+      ? {
+          label: snapshot.thread.label,
+          zone: snapshot.thread.zone,
+          contexts:
+            snapshot.thread.contexts.map(
+              restoreContext,
+            ),
+          subActive:
+            snapshot.thread.subActive,
+          temps: new Map(
+            snapshot.thread.temps,
+          ),
+          slots:
+            snapshot.thread.slots.map(
+              (slot) => slot ?? undefined,
+            ),
+          lastTalked:
+            snapshot.thread.lastTalked ??
+            undefined,
+          chosenStarter:
+            snapshot.thread.chosenStarter,
+          battleOutcome:
+            snapshot.thread.battleOutcome,
+          doors: new Map(
+            snapshot.thread.doors.map(
+              ([tag, door]) => [
+                tag,
+                door === 'pc'
+                  ? 'pc'
+                  : { ...door },
+              ],
+            ),
+          ),
+          immediate:
+            snapshot.thread.immediate,
+          trainer:
+            snapshot.thread.trainer ??
+            undefined,
+          approaching: [
+            ...snapshot.thread.approaching,
+          ],
+          playerStateRequest:
+            snapshot.thread
+              .playerStateRequest,
+          tasks: structuredClone(
+            snapshot.thread.tasks,
+          ),
+          menuVar:
+            snapshot.thread.menuVar,
+          startMenu:
+            snapshot.thread.startMenu,
+          turnAfterHealing:
+            snapshot.thread
+              .turnAfterHealing,
+        } satisfies Thread
+      : null;
+
+    const message =
+      snapshot.ui.message
+        ? {
+            printer:
+              TextPrinter.fromRuntimeSnapshot(
+                snapshot.ui.message.printer,
+              ),
+            ...(snapshot.ui.message.font
+              ? {
+                  font:
+                    snapshot.ui.message.font,
+                }
+              : {}),
+          }
+        : null;
+
+    const menu = snapshot.ui.menu
+      ? ScriptMenu.fromRuntimeSnapshot(
+          snapshot.ui.menu,
+        )
+      : null;
+
+    const tower = snapshot.tower
+      ? BattleTower.restoreRuntimeSnapshot(
+          this.state,
+          this.registries,
+          snapshot.tower,
+        )
+      : null;
+
+    let frontier: FrontierRunner | null = null;
+
+    if (snapshot.frontier) {
+      const frontierSnapshot =
+        snapshot.frontier as {
+          scene: { id: number };
+          entry: Id;
+        };
+
+      frontier = new FrontierRunner(
+        this,
+        frontierSnapshot.scene.id,
+        frontierSnapshot.entry,
+        () => this.tower,
+      );
+
+      frontier.restoreRuntimeSnapshot(
+        snapshot.frontier,
+      );
+    }
+
+    const spearField =
+      snapshot.spearField
+        ? SpearFieldEffects.fromRuntimeSnapshot(
+            this,
+            structuredClone(
+              snapshot.spearField.state.data,
+            ) as SpearPillarAssets,
+            snapshot.spearField.state,
+          )
+        : null;
+
+    const spearApplication =
+      snapshot.spearApplication
+        ? thread
+          ? SpearPillarApplication
+              .fromRuntimeSnapshot(
+                this,
+                thread,
+                snapshot.spearApplication,
+              )
+          : (() => {
+              throw new Error(
+                'Spear application snapshot has no VM thread.',
+              );
+            })()
+        : null;
+
+    const optionalOpState = [
+      'contestPick',
+      'daycarePick',
+      'formSummaryPick',
+      'frontierPicked',
+      'frontierHallPicked',
+      'frontierCastlePicked',
+      'm3aPicked',
+      'sideBagPick',
+      'sideLearned',
+      'sideMovePick',
+    ] as const;
+
+    for (const key of optionalOpState) {
+      delete this.opState[key];
+    }
+
+    Object.assign(
+      this.opState,
+      structuredClone(snapshot.opState),
+    );
+
+    this.tick = snapshot.tick;
+    this.thread = thread;
+    this.input =
+      structuredClone(snapshot.input);
+    this.lastTouch =
+      structuredClone(snapshot.lastTouch);
+
+    this.ui.message = message;
+    this.ui.buttonWait =
+      snapshot.ui.buttonWait;
+    this.ui.abWait = snapshot.ui.abWait;
+    this.ui.yesNo = snapshot.ui.yesNo
+      ? { ...snapshot.ui.yesNo }
+      : null;
+    this.ui.menu = menu;
+    this.ui.signpost =
+      snapshot.ui.signpost
+        ? { ...snapshot.ui.signpost }
+        : null;
+    this.ui.panel =
+      structuredClone(snapshot.ui.panel);
+    this.ui.floorWindow =
+      snapshot.ui.floorWindow
+        ? thread
+          ? {
+              view: structuredClone(
+                snapshot.ui.floorWindow
+                  .view,
+              ),
+              thread,
+              closeVar:
+                snapshot.ui.floorWindow
+                  .closeVar,
+            }
+          : (() => {
+              throw new Error(
+                'Floor window snapshot has no VM thread.',
+              );
+            })()
+        : null;
+    this.ui.moneyWindow =
+      structuredClone(
+        snapshot.ui.moneyWindow,
+      ) ?? null;
+    this.ui.pokemonPreview =
+      structuredClone(
+        snapshot.ui.pokemonPreview,
+      ) ?? null;
+    this.ui.bpWindow =
+      structuredClone(snapshot.ui.bpWindow) ??
+      null;
+    this.ui.coinWindow =
+      structuredClone(
+        snapshot.ui.coinWindow,
+      ) ?? null;
+    this.ui.saveInfo =
+      structuredClone(snapshot.ui.saveInfo) ??
+      null;
+    this.ui.savingIcon =
+      snapshot.ui.savingIcon;
+
+    this.startMenuReady =
+      snapshot.startMenuReady;
+    this.app = snapshot.app
+      ? {
+          request: structuredClone(
+            snapshot.app.request,
+          ),
+          result: structuredClone(
+            snapshot.app.result,
+          ),
+          continuation:
+            structuredClone(
+              snapshot.app.continuation,
+            ),
+          done: null,
+        }
+      : null;
+    this.noticeOpen =
+      snapshot.noticeOpen;
+    this.question = snapshot.question
+      ? {
+          runtime: structuredClone(
+            snapshot.question,
+          ),
+          answer: null,
+        }
+      : null;
+    this.abOnly = snapshot.abOnly;
+    this.tower = tower;
+    this.frontier = frontier;
+    this.spearField = spearField;
+    this.spearFieldZone =
+      snapshot.spearField?.zone ?? null;
+    this.spearApplication =
+      spearApplication;
+  }
+
   // ---------------------------------------------------------------- ScriptRunner
 
   start(start: ScriptStart): void {
@@ -403,16 +1158,30 @@ export class Runner implements ScriptRunner {
   }
 
   /** Yields until the game has run the app (decomp: the script waits on the field task of the application). */
-  openApp(c: Context, request: AppRequest, done: (result: AppResult) => void): Result {
-    if (this.app) throw new Error(`open ${request.app}: the script already waits on ${this.app.request.app}`);
-    this.app = { request, result: null };
-    return this.pause(c, () => {
-      const result = this.app?.result;
-      if (!result) return false;
-      this.app = null;
-      done(result);
-      return true;
-    });
+  openApp(
+    c: Context,
+    request: AppRequest,
+    done: ((result: AppResult) => void) | AppContinuation,
+  ): Result {
+    if (this.app) {
+      throw new Error(
+        `open ${request.app}: the script already waits on ${this.app.request.app}`,
+      );
+    }
+
+    this.app = {
+      request,
+      result: null,
+      continuation:
+        typeof done === 'function' ? null : done,
+      done: typeof done === 'function' ? done : null,
+    };
+
+    return this.pause(
+      c,
+      () => false,
+      { kind: 'app' },
+    );
   }
 
   /** Decomp FieldMap_Init: the zone's on-load script, the field's dynamic features, then its on-resume script. */
@@ -448,9 +1217,24 @@ export class Runner implements ScriptRunner {
     this.abOnly = typeof text !== 'string';
   }
 
-  ask(text: Id, slots: string[], answer: (yes: boolean) => void): void {
+  ask(
+    text: Id,
+    slots: string[],
+    answer:
+      | ((yes: boolean) => void)
+      | RuntimeQuestion,
+  ): void {
     this.notice(text, slots);
-    this.question = answer;
+    this.question = {
+      runtime:
+        typeof answer === 'function'
+          ? null
+          : structuredClone(answer),
+      answer:
+        typeof answer === 'function'
+          ? answer
+          : null,
+    };
   }
 
   /** Decomp PrintRegisteredKeyItemUseMessage: once printed, A, B or the d-pad erases the box. A question shows YES/NO. */
@@ -477,12 +1261,65 @@ export class Runner implements ScriptRunner {
     else if (has(input.pressed, 'down')) box.cursor = 1;
     if (yes !== null || box.cursor !== before) this.playFieldSe(SE_CONFIRM);
     if (yes === null) return;
-    const answer = this.question!;
+    const question = this.question!;
     this.question = null;
     this.ui.yesNo = null;
     this.ui.message = null;
     this.noticeOpen = false;
-    answer(yes);
+
+    if (question.runtime) {
+      switch (question.runtime.kind) {
+        case 'repel':
+          if (!yes) return;
+
+          if (
+            !useRepel(
+              this.state,
+              this.registries,
+              question.runtime.item,
+            )
+          ) {
+            throw new Error(
+              'repel prompt: a Repel is still active',
+            );
+          }
+
+          this.notice(
+            question.runtime.usedText,
+            [
+              this.state.names.player,
+              question.runtime.itemName,
+            ],
+          );
+          return;
+      }
+    }
+
+    if (!question.answer) {
+      throw new Error(
+        'field question has no continuation',
+      );
+    }
+
+    question.answer(yes);
+  }
+
+  startSpearApplication(
+    thread: Thread,
+    data: SpearPillarAssets,
+  ): void {
+    if (this.spearApplication) {
+      throw new Error(
+        'Spear Pillar application already runs',
+      );
+    }
+
+    this.spearApplication =
+      new SpearPillarApplication(
+        this,
+        thread,
+        data,
+      );
   }
 
   startSpearField(
@@ -1131,6 +1968,372 @@ export class Runner implements ScriptRunner {
         t.battleOutcome = result.outcome;
         return true;
       }
+
+      case 'frontier':
+        if (!this.frontier) {
+          throw new Error(
+            'Frontier wait has no Frontier runner',
+          );
+        }
+
+        if (!this.frontier.done) return false;
+
+        this.frontier = null;
+        return true;
+
+      case 'app': {
+        const app = this.app;
+
+        if (!app) {
+          throw new Error(
+            'app runtime wait has no application',
+          );
+        }
+
+        if (!app.result) return false;
+
+        const result = app.result;
+        this.app = null;
+
+        if (app.continuation) {
+          switch (app.continuation.kind) {
+            case 'none':
+              return true;
+
+            case 'op-state':
+              switch (app.continuation.target) {
+                case 'contestPick':
+                  if (result.app !== 'contest-select') {
+                    throw new Error(
+                      `contest selection returned ${result.app}`,
+                    );
+                  }
+                  this.opState.contestPick = result.slot;
+                  return true;
+
+                case 'daycarePick':
+                  if (result.app !== 'daycare-select') {
+                    throw new Error(
+                      `daycare selection returned ${result.app}`,
+                    );
+                  }
+                  this.opState.daycarePick = result.slot;
+                  return true;
+
+                case 'formSummaryPick':
+                  if (result.app !== 'summary-teach') {
+                    throw new Error(
+                      `move summary returned ${result.app}`,
+                    );
+                  }
+                  this.opState.formSummaryPick =
+                    result.forget;
+                  return true;
+
+                case 'frontierPicked':
+                case 'frontierHallPicked':
+                case 'frontierCastlePicked':
+                  if (result.app !== 'party-order') {
+                    throw new Error(
+                      `Frontier party selection returned ${result.app}`,
+                    );
+                  }
+                  this.opState[
+                    app.continuation.target
+                  ] = result.order;
+                  return true;
+
+                case 'm3aPicked':
+                  if (result.app !== 'party') {
+                    throw new Error(
+                      `party selection returned ${result.app}`,
+                    );
+                  }
+                  this.opState.m3aPicked = result.slot;
+                  return true;
+
+                case 'sideBagPick':
+                  if (result.app !== 'bag-pick') {
+                    throw new Error(
+                      `bag selection returned ${result.app}`,
+                    );
+                  }
+                  this.opState.sideBagPick = result.item;
+                  return true;
+
+                case 'sideLearned':
+                  if (result.app !== 'move-reminder') {
+                    throw new Error(
+                      `move reminder returned ${result.app}`,
+                    );
+                  }
+                  this.opState.sideLearned =
+                    result.learned;
+                  return true;
+
+                case 'sideMovePick':
+                  if (result.app !== 'summary-teach') {
+                    throw new Error(
+                      `move selection returned ${result.app}`,
+                    );
+                  }
+                  this.opState.sideMovePick =
+                    result.forget;
+                  return true;
+              }
+
+              throw new Error(
+                'unknown operation-state continuation',
+              );
+
+            case 'gallery-saved':
+              if (result.app !== 'gallery-dress-up') {
+                throw new Error(
+                  `gallery dress-up returned ${result.app}`,
+                );
+              }
+              this.setVar(
+                t,
+                app.continuation.variable,
+                result.saved ? 1 : 0,
+              );
+              return true;
+
+            case 'hatch-nickname': {
+              if (result.app !== 'hatch') {
+                throw new Error(
+                  `egg hatch returned ${result.app}`,
+                );
+              }
+
+              const mon =
+                this.state.party[
+                  app.continuation.slot
+                ];
+
+              if (!mon) {
+                throw new Error(
+                  `egg hatch has no party Pokémon in slot ${app.continuation.slot}`,
+                );
+              }
+
+              if (result.nickname !== null) {
+                mon.nickname = result.nickname;
+              }
+
+              return true;
+            }
+
+            case 'restore-field-bgm':
+              if (result.app !== 'trade') {
+                throw new Error(
+                  `trade scene returned ${result.app}`,
+                );
+              }
+              this.audio.fadeToBgm(
+                this.audio.effectiveBgm(
+                  this.state.player.zone,
+                ),
+              );
+              return true;
+
+            case 'pokemon-naming': {
+              if (result.app !== 'naming') {
+                throw new Error(
+                  `Pokémon naming returned ${result.app}`,
+                );
+              }
+
+              const mon =
+                this.state.party[
+                  app.continuation.slot
+                ];
+
+              if (!mon) {
+                throw new Error(
+                  `Pokémon naming has no party Pokémon in slot ${app.continuation.slot}`,
+                );
+              }
+
+              if (result.name !== null) {
+                mon.nickname =
+                  result.name ===
+                  app.continuation.speciesName
+                    ? null
+                    : result.name;
+              }
+
+              this.setVar(
+                t,
+                app.continuation.variable,
+                result.name === null ? 1 : 0,
+              );
+              return true;
+            }
+
+            case 'tablet-naming':
+              if (result.app !== 'naming') {
+                throw new Error(
+                  `tablet naming returned ${result.app}`,
+                );
+              }
+
+              if (result.name !== null) {
+                this.state.tabletName = result.name;
+              }
+
+              this.setVar(
+                t,
+                app.continuation.variable,
+                result.name === null
+                  ? app.continuation.noInput
+                  : app.continuation.accepted,
+              );
+              return true;
+
+            case 'easy-chat': {
+              if (result.app !== 'easy-chat') {
+                throw new Error(
+                  `Easy Chat returned ${result.app}`,
+                );
+              }
+
+              this.setVar(
+                t,
+                app.continuation.resultVariable,
+                result.words ? 1 : 0,
+              );
+
+              const wordVariables =
+                app.continuation.wordVariables;
+
+              result.words?.forEach((word, index) => {
+                const variable = wordVariables[index];
+
+                if (variable) {
+                  this.setVar(t, variable, word);
+                }
+              });
+
+              return true;
+            }
+
+            case 'never-resume':
+              throw new Error(
+                `${app.continuation.operation}: the script never resumes`,
+              );
+
+            case 'mart-journal':
+              if (result.app !== 'mart') {
+                throw new Error(
+                  `mart returned ${result.app}`,
+                );
+              }
+
+              journalMart(
+                this.registries,
+                this.state,
+                result.bought ?? 0,
+                result.sold ?? 0,
+              );
+              return true;
+
+            case 'storage-journal':
+              if (result.app !== 'storage') {
+                throw new Error(
+                  `storage returned ${result.app}`,
+                );
+              }
+
+              if (
+                JSON.stringify([
+                  this.state.boxes,
+                  this.state.party,
+                ]) !== app.continuation.before
+              ) {
+                journalEvent(
+                  this.registries,
+                  this.state,
+                  app.continuation.event,
+                );
+              }
+
+              return true;
+
+            case 'slots-result': {
+              if (result.app !== 'slots') {
+                throw new Error(
+                  `slot machine returned ${result.app}`,
+                );
+              }
+
+              if (
+                result.coins >=
+                app.continuation.before +
+                  app.continuation.tvCoins
+              ) {
+                saveTvSegment(this.state, {
+                  kind: 'slots',
+                  before: app.continuation.before,
+                  after: result.coins,
+                  spent: Math.floor(
+                    (
+                      this.state.tick -
+                      app.continuation.startTick
+                    ) /
+                      (30 * 60),
+                  ),
+                });
+              }
+
+              this.state.coins = result.coins;
+
+              addToGameRecord(
+                this.state,
+                this.registries,
+                app.continuation.bonusRecord,
+                result.rounds,
+              );
+
+              const previous = this.getFieldVar(
+                app.continuation.streakVariable,
+              );
+
+              if (result.streak > previous) {
+                this.setFieldVar(
+                  app.continuation.streakVariable,
+                  result.streak,
+                );
+              }
+
+              return true;
+            }
+          }
+        }
+
+        if (!app.done) {
+          throw new Error(
+            'app runtime wait has no continuation',
+          );
+        }
+
+        app.done(result);
+        return true;
+      }
+
+      case 'spear-application':
+        if (!this.spearApplication) {
+          throw new Error(
+            'Spear application wait has no application',
+          );
+        }
+
+        if (!this.spearApplication.step()) {
+          return false;
+        }
+
+        this.spearApplication = null;
+        return true;
 
       case 'eterna-clock': {
         const phase = this.field.eternaGymClock();

@@ -81,10 +81,11 @@ export function daycareHandlers(r: Runner): Record<string, Handler> {
     // Decomp ScrCmd_OpenPartyMenuForDaycare + GetDayCarePartyMenuResult: the app handles SUMMARY itself, so the
     // summary flag is always 0 (the script's SetMonSummary loop is not taken).
     open_party_menu_for_daycare: (_t, c) =>
-      r.openApp(c, { app: 'daycare-select' }, (result) => {
-        if (result.app !== 'daycare-select') throw new Error(`open_party_menu_for_daycare: got a ${result.app} result`);
-        r.opState.daycarePick = result.slot;
-      }),
+      r.openApp(
+        c,
+        { app: 'daycare-select' },
+        { kind: 'op-state', target: 'daycarePick' },
+      ),
     get_day_care_party_menu_result: (t, _c, a) => {
       const slot = r.opState.daycarePick;
       if (slot === undefined) throw new Error('get_day_care_party_menu_result: no daycare party menu ran');
@@ -193,10 +194,11 @@ export function daycareHandlers(r: Runner): Record<string, Handler> {
       scoreCatch(state(), r.registries, m.species);
       markCaught(state(), r.registries, m);
       addPoketchHistory(state(), m);
-      return r.openApp(c, { app: 'hatch', slot }, (result) => {
-        if (result.app !== 'hatch') throw new Error(`hatch_egg: got a ${result.app} result`);
-        if (result.nickname !== null) m.nickname = result.nickname;
-      });
+      return r.openApp(
+        c,
+        { app: 'hatch', slot },
+        { kind: 'hatch-nickname', slot },
+      );
     },
   };
 }

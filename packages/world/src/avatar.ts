@@ -286,7 +286,8 @@ export class Avatar {
     if (this.task?.kind === 'strength') {
       const boulderId = actorKey(this.task.boulder);
       if (!boulderId) throw new Error('runtime snapshot: Strength boulder has no stable actor key');
-      const { boulder: _boulder, ...rest } = this.task;
+      const rest = { ...this.task };
+      delete (rest as Partial<typeof rest>).boulder;
       task = JSON.parse(JSON.stringify({ ...rest, boulderId })) as AvatarRuntimeSnapshot['task'];
     } else if (this.task) {
       task = JSON.parse(JSON.stringify(this.task)) as AvatarRuntimeSnapshot['task'];

@@ -1,3 +1,8 @@
+import {
+  captureFrontierServiceRuntime,
+  restoreFrontierServiceRuntime,
+  type FrontierServiceRuntimeSnapshot,
+} from './frontier-runtime.ts';
 /**
  * The Battle Hall's rules (decomp overlay 104 battle_hall.c, battle_hall_helpers.c, frscrcmd_battle_hall.c; arm9
  * scrcmd_battle_hall.c, battle_hall_save.c, battle_hall_win_records.c). Headless and deterministic: the frontier VM's
@@ -167,6 +172,11 @@ export function hallOpponentPick(t: BattleHallTables, rand: Rand16, o: { type: I
  * One Battle Hall challenge (decomp BattleHall): alive from the frontier's InitBattleHall to FreeBattleHall, over the
  * party Pokémon in `slots`. Not saved itself: `save` writes its resumable part to `FrontierState.hall.save`.
  */
+export type BattleHallRuntimeSnapshot =
+  FrontierServiceRuntimeSnapshot<
+    'battle-hall'
+  >;
+
 export class BattleHall {
   readonly challengeType: number;
   /** Decomp currentBattle (0–9), currentStreak, currentRound, saveStreak, opponentsLevel, playerLevelSqrt. */
@@ -231,6 +241,26 @@ export class BattleHall {
   /** Decomp BattleHall_Init(saveData, resumingFromSave, challengeType, partySlot1, partySlot2). */
   static init(state: GameState, registries: Registries, rand: Rand16, resume: boolean, challengeType: number, slot1: number, slot2: number): BattleHall {
     return new BattleHall(state, registries, rand, resume, challengeType, slot1, slot2);
+  }
+
+  captureRuntimeSnapshot(): BattleHallRuntimeSnapshot {
+    return captureFrontierServiceRuntime(
+      this,
+      'battle-hall',
+      ['state', 'registries', 'rand'],
+    );
+  }
+
+  static restoreRuntimeSnapshot(
+    state: GameState, registries: Registries, rand: Rand16,
+    value: unknown,
+  ): BattleHall {
+    return restoreFrontierServiceRuntime(
+      BattleHall.prototype,
+      { state, registries, rand },
+      value,
+      'battle-hall',
+    );
   }
 
   private get tables(): FrontierTables {

@@ -628,7 +628,7 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
   // ---------- MapFeature ----------
 
   /** Capture the idle feature runtime without rebuilding the room or its actors. */
-  captureRuntimeSnapshot(): unknown {
+  captureRuntimeSnapshot() {
     if (this.event !== null || this.ride !== null) {
       throw new Error('Distortion World snapshot unavailable during an event or elevator ride.');
     }
@@ -670,8 +670,11 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
   /** Preflight every feature-owned value before World changes any live runtime state. */
   validateRuntimeSnapshot(value: unknown): string | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return 'snapshot must be an object';
-    const s = value as any;
-    const finite3 = (v: any) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
+    const s = value as ReturnType<typeof this.captureRuntimeSnapshot>;
+    const finite3 = (v: unknown): v is [number, number, number] =>
+      Array.isArray(v) &&
+      v.length === 3 &&
+      v.every(Number.isFinite);
     if (s.zone !== this.h.zone().id) return 'room identity mismatch';
     if (this.event || this.ride || s.eventActive !== false || s.rideActive !== false)
       return 'active event/elevator continuation is not serializable';
@@ -706,10 +709,11 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
         !finite3(s.shadow.angles) || !Number.isSafeInteger(s.shadow.left) || s.shadow.left < 0 ||
         !Number.isSafeInteger(s.shadow.sound) || !Number.isFinite(s.shadow.scale) ||
         typeof s.shadow.done !== 'boolean')) return 'invalid shadow state';
-    if (!Array.isArray(s.platformOffsets) || s.platformOffsets.some((e: any) =>
+    if (!Array.isArray(s.platformOffsets) || s.platformOffsets.some((e: unknown) =>
         !Array.isArray(e) || e.length !== 2 || typeof e[0] !== 'string' || !finite3(e[1])))
       return 'invalid platform offsets';
-    if (!s.roll || !['cur', 'prev', 'final', 'delta', 'steps'].every(k => Number.isFinite(s.roll[k])) ||
+    if (!s.roll || !(['cur', 'prev', 'final', 'delta', 'steps'] as const)
+          .every((k) => Number.isFinite(s.roll[k])) ||
         !Number.isSafeInteger(s.roll.steps) || s.roll.steps < 0) return 'invalid roll state';
     if ((s.cascadeMount === null) !== (this.cascadeMount === null))
       return 'cascade mount identity mismatch';
@@ -717,16 +721,25 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
       const e = this.cascadeMount!.validateRuntimeSnapshot(s.cascadeMount);
       if (e) return `cascade mount: ${e}`;
     }
-    const validPose = (p: any) => p === null || (!!p && finite3(p.rotation) &&
-      Number.isFinite(p.orbit) && finite3(p.fix) && Number.isFinite(p.bobX) &&
-      Number.isFinite(p.bobFix) && typeof p.externalBob === 'boolean');
+    const validPose = (p: unknown) => {
+      if (p === null) return true;
+      if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
+      const pose = p as Record<string, unknown>;
+      return finite3(pose.rotation) &&
+        Number.isFinite(pose.orbit) &&
+        finite3(pose.fix) &&
+        Number.isFinite(pose.bobX) &&
+        Number.isFinite(pose.bobFix) &&
+        typeof pose.externalBob === 'boolean';
+    };
     if (!validPose(s.mountPrev)) return 'invalid previous mount pose';
     if (!Number.isSafeInteger(s.giratinaTick) || s.giratinaTick < 0) return 'invalid Giratina tick';
-    if (!Array.isArray(s.propsPrev) || s.propsPrev.some((e: any) =>
+    if (!Array.isArray(s.propsPrev) || s.propsPrev.some((e: unknown) =>
         !Array.isArray(e) || e.length !== 2 || typeof e[0] !== 'string' || !finite3(e[1])))
       return 'invalid previous prop positions';
     const c = s.camera;
-    if (!c || !['cur', 'prev', 'target', 'acc', 'step'].every(k => finite3(c[k])) ||
+    if (!c || !(['cur', 'prev', 'target', 'acc', 'step'] as const)
+          .every((k) => finite3(c[k])) ||
         typeof c.active !== 'boolean' || !Number.isSafeInteger(c.steps) || c.steps < 0)
       return 'invalid camera transition';
     if (!s.steppingStones || !Number.isSafeInteger(s.steppingStones.step) ||
@@ -739,28 +752,43 @@ export class DistortionWorld implements MapFeature, AvatarDistortion {
   restoreRuntimeSnapshot(value: unknown): void {
     const error = this.validateRuntimeSnapshot(value);
     if (error) throw new Error(`Invalid Distortion World snapshot: ${error}`);
-    const s = value as any;
+    const s = value as ReturnType<typeof this.captureRuntimeSnapshot>;
     Object.assign(this.slot, {
       ...s.slot,
       cameraAngle: [...s.slot.cameraAngle],
-      platforms: s.slot.platforms.map((p: any) => ({ ...p })),
+      platforms: s.slot.platforms.map((p) => ({ ...p })),
     });
     this.current = s.current;
     s.ghosts.forEach((g: unknown, i: number) => this.ghosts[i]!.restoreRuntimeSnapshot(g));
     this.sky.restoreRuntimeSnapshot(s.sky);
     this.shadow = s.shadow ? {
-      ...s.shadow, pos: [...s.shadow.pos], step: [...s.shadow.step], angles: [...s.shadow.angles],
+      ...s.shadow,
+      pos: [...s.shadow.pos],
+      step: [...s.shadow.step],
+      angles: [...s.shadow.angles] as [number, number, number],
     } : null;
     this.platformOffsets.clear();
-    for (const [k, v] of s.platformOffsets) this.platformOffsets.set(k, [...v]);
+    for (const [k, v] of s.platformOffsets as [string, number[]][]) {
+      this.platformOffsets.set(
+        k,
+        [...v] as [number, number, number],
+      );
+    }
     this.roll = { ...s.roll };
     if (this.cascadeMount && s.cascadeMount) this.cascadeMount.restoreRuntimeSnapshot(s.cascadeMount);
     this.mountPrev = s.mountPrev ? {
-      ...s.mountPrev, rotation: [...s.mountPrev.rotation], fix: [...s.mountPrev.fix],
+      ...s.mountPrev,
+      rotation: [...s.mountPrev.rotation] as [number, number, number],
+      fix: [...s.mountPrev.fix] as [number, number, number],
     } : null;
     this.giratinaTick = s.giratinaTick;
     this.propsPrev.clear();
-    for (const [k, v] of s.propsPrev) this.propsPrev.set(k, [...v] as [number, number, number]);
+    for (const [k, v] of s.propsPrev as [string, number[]][]) {
+      this.propsPrev.set(
+        k,
+        [...v] as [number, number, number],
+      );
+    }
     this.camera = {
       cur: [...s.camera.cur], prev: [...s.camera.prev], target: [...s.camera.target],
       active: s.camera.active, steps: s.camera.steps, acc: [...s.camera.acc], step: [...s.camera.step],

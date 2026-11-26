@@ -74,20 +74,28 @@ export function hallFrontierHandlers(): Record<string, FrontierHandler> {
     fr_open_battle_hall_app: (f, c) => {
       const h = hall(f);
       const party = h.mons().map((m) => structuredClone(m));
-      return f.openApp(c, { app: 'hall-board', challengeType: h.challengeType, ranks: [...h.ranks], streak: h.streak, party, cursor: h.rankCell }, (result) => {
-        if (result.app !== 'hall-board') throw new Error(`fr_open_battle_hall_app: got a ${result.app} result`);
-        h.setCell(result.cell);
-      });
+      return f.openApp(
+        c,
+        {
+          app: 'hall-board',
+          challengeType: h.challengeType,
+          ranks: [...h.ranks],
+          streak: h.streak,
+          party,
+          cursor: h.rankCell,
+        },
+        { kind: 'hall-board' },
+      );
     },
     // Decomp FrontierScrCmd_BattleHall_StartBattle: the battle (a sub-app); the scripts wait for its end.
     fr_battle_hall_start_battle: (f, c) => {
       const h = hall(f);
       f.r.field.startBattle({ kind: 'trainer', trainers: [], wild: [], ...(hallPartySize(h.challengeType) === 2 ? { topology: 'double' as const } : {}), frontier: h.battleSetup() });
-      return f.pause(c, () => {
-        if (!f.r.field.battleDone()) return false;
-        f.afterSubApp();
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'battle-return' },
+      );
     },
     fr_battle_hall_cleanup_battle: (f) => {
       const result = f.r.field.battleDone();
@@ -240,19 +248,35 @@ export function hallFrontierHandlers(): Record<string, FrontierHandler> {
       f.scene.startShake((x << 16) >> 16, (y << 16) >> 16, every, count);
       return 'continue';
     },
-    fr_cmd_4d: (f, c) => f.pause(c, () => f.scene.shakeDone()),
+    fr_cmd_4d: (f, c) =>
+      f.pause(
+        c,
+        () => false,
+        { kind: 'shake' },
+      ),
     fr_cmd_4e: (f, c, a) => {
       const [x1, y1, x2, y2, delay, on] = [0, 1, 2, 3, 4, 5].map((i) => f.val(c, a[i])) as [number, number, number, number, number, number];
       f.scene.startWindow({ x1: x1 & 0xff, y1: y1 & 0xff, x2: x2 & 0xff, y2: y2 & 0xff }, (delay << 16) >> 16, on === 1);
       return 'continue';
     },
-    fr_cmd_4f: (f, c) => f.pause(c, () => f.scene.windowDone()),
+    fr_cmd_4f: (f, c) =>
+      f.pause(
+        c,
+        () => false,
+        { kind: 'window' },
+      ),
     // Decomp FrontierScrCmd_InitParticleSystem … WaitForParticleSystemEmitters (frontier_particle_system.c): the scene's
     // SPL particle systems (the Factory head's smoke, the Hall's lights, the Castle's twinkle, the Arcade's effects).
     fr_init_particle_system: (f, c, a) => (f.scene.particles.init(f.val(c, a[0]), f.val(c, a[1]), f.val(c, a[2])), 'continue'),
     fr_free_particle_system: (f, c, a) => (f.scene.particles.free(f.val(c, a[0])), 'continue'),
     fr_create_particle_system_emitter: (f, c, a) => (f.scene.particles.createEmitter(f.val(c, a[0]), f.val(c, a[1])), 'continue'),
-    fr_wait_for_particle_system_emitters: (f, c) => f.pause(c, () => f.scene.particles.idle()),
+    fr_wait_for_particle_system_emitters:
+      (f, c) =>
+        f.pause(
+          c,
+          () => false,
+          { kind: 'particles' },
+        ),
     // Decomp FrontierScrCmd_73: SaveData_SaveStateInit (a full save) and the wait for it.
     fr_cmd_73: (f) => (f.r.saves().write(), 'yield'),
   };

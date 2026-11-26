@@ -241,6 +241,72 @@ test:DWWarp::
     ).toHaveLength(124);
   });
 
+  it('restores a script runner at the exact waiting tick', () => {
+    const d = run(`
+test:RestoreWait::
+  wait_ab_press
+  end
+`);
+
+    d.vm.start({
+      label: 'test:RestoreWait',
+      zone: 'fixture:TOWN',
+      source: 'test',
+    });
+
+    d.tick();
+
+    const runner = d.vm as Runner;
+    const snapshot = JSON.parse(
+      JSON.stringify(
+        runner.captureRuntimeSnapshot(),
+      ),
+    );
+
+    expect(
+      runner.thread?.contexts[0]?.waitState,
+    ).toEqual({ kind: 'ab' });
+
+    runner.restoreRuntimeSnapshot(snapshot);
+
+    expect(
+      runner.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+
+    expect(
+      runner.thread?.contexts[0],
+    ).toMatchObject({
+      label: 'test:RestoreWait',
+      state: 'waiting',
+      wait: null,
+      waitState: { kind: 'ab' },
+    });
+
+    d.press('a');
+
+    expect(
+      runner.thread?.contexts[0],
+    ).toMatchObject({
+      state: 'running',
+      waitState: null,
+    });
+
+    d.tick();
+    expect(runner.thread).toBeNull();
+  });
+
+  it('rejects malformed script runner snapshots', () => {
+    const d = run('test:Nothing::\n  end\n');
+    const runner = d.vm as Runner;
+
+    expect(() =>
+      runner.restoreRuntimeSnapshot({
+        kind: 'script-runner',
+        tick: -1,
+      }),
+    ).toThrow(/script-runner tick is invalid/i);
+  });
+
   it('wait_button: a d-pad press turns the player and ends the wait', () => {
     const d = driver();
     d.vm.start({ label: 'fixture:Room_OnFrame_Intro', zone: 'fixture:ROOM', source: 'frame' });

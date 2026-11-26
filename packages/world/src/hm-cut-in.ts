@@ -22,7 +22,7 @@ export class HmCutIn {
   private quiet = false;
   constructor(
     readonly mon: Pokemon,
-    audio: AudioHost,
+    private readonly audio: AudioHost,
   ) {
     this.scene = new FlyCutIn(
       {
@@ -78,6 +78,19 @@ export class HmCutIn {
     cutIn.quiet = false;
 
     return cutIn;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: RuntimeHmCutInSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      HmCutIn.restore(
+        this.mon,
+        this.audio,
+        snapshot,
+      ),
+    );
   }
 
   /** One 30 Hz tick; true once the cut-in has finished. */

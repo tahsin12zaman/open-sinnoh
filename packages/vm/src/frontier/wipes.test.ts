@@ -62,6 +62,103 @@ describe('pre-battle wipes', () => {
     expect(v.bgHidden).toBe(false);
   });
 
+  it('restores block wipes at the exact frame', () => {
+    for (const kind of ['rows', 'columns'] as const) {
+      const original = new BlockWipe(kind);
+
+      for (let frame = 0; frame < 11; frame++) {
+        original.step();
+      }
+
+      const snapshot =
+        original.captureRuntimeSnapshot();
+      const restored =
+        BlockWipe.restoreRuntimeSnapshot(snapshot);
+
+      expect(
+        restored.captureRuntimeSnapshot(),
+      ).toEqual(snapshot);
+      expect(restored.view()).toEqual(original.view());
+
+      for (let frame = 0; frame < 20; frame++) {
+        const originalDone = original.step();
+        const restoredDone = restored.step();
+
+        expect(restoredDone).toBe(originalDone);
+        expect(restored.view()).toEqual(
+          original.view(),
+        );
+
+        if (originalDone) break;
+      }
+    }
+  });
+
+  it('restores line wipes without retaining snapshot references', () => {
+    const original = new LineWipe(2, {
+      bg: {
+        origin: { x: 8, y: 16 },
+        offset: 3,
+      },
+      fg: {
+        origin: { x: 24, y: 32 },
+        offset: 5,
+      },
+    });
+
+    for (let frame = 0; frame < 17; frame++) {
+      original.step();
+    }
+
+    original.bgHidden = true;
+
+    const snapshot =
+      original.captureRuntimeSnapshot();
+    const restored =
+      LineWipe.restoreRuntimeSnapshot(snapshot);
+
+    expect(
+      restored.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+    expect(restored.view()).toEqual(original.view());
+
+    snapshot.moved[0]!.x = 99999;
+    snapshot.layers.bg.origin.x = 99999;
+
+    expect(restored.view()).toEqual(original.view());
+
+    original.step();
+    restored.step();
+
+    expect(restored.view()).toEqual(original.view());
+  });
+
+  it('rejects malformed wipe snapshots', () => {
+    expect(() =>
+      BlockWipe.restoreRuntimeSnapshot({
+        kind: 'block-wipe',
+        direction: 'rows',
+        frames: 1,
+        interval: 1,
+        elapsed: -1,
+      }),
+    ).toThrow(
+      'Invalid Frontier block-wipe runtime snapshot.',
+    );
+
+    expect(() =>
+      LineWipe.restoreRuntimeSnapshot({
+        kind: 'line-wipe',
+        mode: 2,
+        layers: {},
+        moved: [],
+        bgHidden: false,
+      }),
+    ).toThrow(
+      'Invalid Frontier line-wipe runtime snapshot.',
+    );
+  });
+
   it('the Castle line wipe alternates directions and keeps negative points off the layer', () => {
     const w = new LineWipe(2, { bg: { origin: { x: 0, y: 0 }, offset: 0 }, fg: { origin: { x: 0, y: 0 }, offset: 0 } });
     w.step();

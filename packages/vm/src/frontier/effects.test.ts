@@ -64,6 +64,93 @@ describe('frontier particle systems (frontier_particle_system.c)', () => {
   });
 });
 
+describe('frontier particle runtime snapshots', () => {
+  it('restores every loaded system and the shared RNG exactly', () => {
+    const original = new FrontierParticles(
+      new SplRandom(77),
+      (n) => {
+        if (n !== 5) {
+          throw new Error(`no ${n}`);
+        }
+
+        return system;
+      },
+    );
+
+    original.init(2, 5, 1);
+    original.createEmitter(2, 0);
+    original.createEmitter(
+      2,
+      1,
+      (live) => live.setPos(1, 4096),
+    );
+
+    for (let frame = 0; frame < 5; frame++) {
+      original.step();
+    }
+
+    const snapshot =
+      original.captureRuntimeSnapshot();
+    const saved = structuredClone(snapshot);
+    const restored = new FrontierParticles(
+      new SplRandom(0),
+      (n) => {
+        if (n !== 5) {
+          throw new Error(`no ${n}`);
+        }
+
+        return system;
+      },
+    );
+
+    restored.restoreRuntimeSnapshot(
+      snapshot,
+    );
+
+    expect(
+      restored.captureRuntimeSnapshot(),
+    ).toEqual(saved);
+
+    snapshot.drawn.length = 0;
+    snapshot.systems[2]!.manager.rngState =
+      999;
+
+    expect(
+      restored.captureRuntimeSnapshot(),
+    ).toEqual(saved);
+
+    for (let frame = 0; frame < 20; frame++) {
+      original.step();
+      restored.step();
+
+      expect(restored.drawn).toEqual(
+        original.drawn,
+      );
+      expect(
+        restored.captureRuntimeSnapshot(),
+      ).toEqual(
+        original.captureRuntimeSnapshot(),
+      );
+    }
+  });
+
+  it('rejects malformed Frontier particle snapshots', () => {
+    const particles = new FrontierParticles(
+      new SplRandom(0),
+      () => system,
+    );
+
+    expect(() =>
+      particles.restoreRuntimeSnapshot({
+        kind: 'frontier-particles',
+        systems: [],
+      }),
+    ).toThrow(
+      'Invalid Frontier particles runtime snapshot.',
+    );
+  });
+});
+
 describe('the Frontier Brain cut-in (frontier_brain_encounter_effect.c)', () => {
   const art = {
     brains: { tower: { banner: [], mugshot: 'test:ui2d/m' as Id, name: 'test:name' as Id } },
@@ -73,6 +160,100 @@ describe('the Frontier Brain cut-in (frontier_brain_encounter_effect.c)', () => 
     sheet === art.vs
       ? [{ mode: 'forward', loopStart: 0, frames: [{ cell: 3, ticks: 1 }] }, { mode: 'forward', loopStart: 0, frames: [{ cell: 7, ticks: 1 }] }]
       : [{ mode: 'forward', loopStart: 0, frames: [{ cell: 1, ticks: 1 }] }];
+
+  it('restores a cut-in at the exact frame', () => {
+    let originalFade = 0;
+    let restoredFade = 0;
+
+    const original = new BrainCutIn('tower', {
+      fade: (_out, frames) => {
+        originalFade = frames;
+      },
+      fadeDone: () => originalFade === 0,
+    });
+
+    for (let frame = 0; frame < 53; frame++) {
+      original.step();
+
+      if (originalFade > 0) {
+        originalFade--;
+      }
+    }
+
+    const snapshot =
+      original.captureRuntimeSnapshot();
+    restoredFade = originalFade;
+
+    const restored =
+      BrainCutIn.restoreRuntimeSnapshot(
+        snapshot,
+        {
+          fade: (_out, frames) => {
+            restoredFade = frames;
+          },
+          fadeDone: () => restoredFade === 0,
+        },
+      );
+
+    expect(
+      restored.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+    expect(
+      restored.view(art, 'PALMER', anims),
+    ).toEqual(
+      original.view(art, 'PALMER', anims),
+    );
+
+    snapshot.vs[0]!.lerp.value = 99999;
+
+    expect(
+      restored.captureRuntimeSnapshot(),
+    ).not.toEqual(snapshot);
+
+    for (
+      let frame = 0;
+      frame < 100 &&
+      !original.finished;
+      frame++
+    ) {
+      original.step();
+      restored.step();
+
+      if (originalFade > 0) originalFade--;
+      if (restoredFade > 0) restoredFade--;
+
+      expect(restoredFade).toBe(originalFade);
+      expect(
+        restored.captureRuntimeSnapshot(),
+      ).toEqual(
+        original.captureRuntimeSnapshot(),
+      );
+      expect(
+        restored.view(art, 'PALMER', anims),
+      ).toEqual(
+        original.view(art, 'PALMER', anims),
+      );
+    }
+
+    expect(restored.finished).toBe(true);
+  });
+
+  it('rejects malformed cut-in snapshots', () => {
+    expect(() =>
+      BrainCutIn.restoreRuntimeSnapshot(
+        {
+          kind: 'frontier-brain-cut-in',
+          facility: 'tower',
+        },
+        {
+          fade: () => {},
+          fadeDone: () => true,
+        },
+      ),
+    ).toThrow(
+      'Invalid Frontier Brain cut-in runtime snapshot.',
+    );
+  });
 
   it('flashes, opens the banner, grows the VS in, slides the silhouette in, lights it with the name, then fades to white', () => {
     let fading = 0;

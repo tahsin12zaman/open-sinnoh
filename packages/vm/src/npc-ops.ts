@@ -30,7 +30,7 @@ export function npcHandlers(r: Runner): Record<string, Handler> {
   const gender = (m: (typeof r.state.party)[number]) => monGender(dexOf(r.registries), m);
   return {
     /** ScrCmd_OpenRegionMap (TOWN_MAP_MODE_WALL_MAP): the Town Map to look at; the script waits until it closes. */
-    open_region_map: (_t, c) => r.openApp(c, { app: 'town-map' }, () => {}),
+    open_region_map: (_t, c) => r.openApp(c, { app: 'town-map' }, { kind: 'none' }),
     /** Pokemon_TrySurvivePoison: a poisoned party Pokémon at 1 HP is cured (TRUE) instead of fainting. */
     survive_poison: (t, _c, a) => {
       const mon = partyMon('survive_poison', r.val(t, a[1]));

@@ -9,8 +9,23 @@
  */
 import type { FrontierActorView, FrontierObjectView, FrontierSceneData, FrontierTables, FrontierView, Movement, Ui2dAnimation } from '@opensinnoh/contracts';
 import type { Id } from '@opensinnoh/core';
-import type { BrainCutIn, FrontierParticles } from './effects.ts';
-import type { BlockWipe, LineLayer, LineWipe } from './wipes.ts';
+import {
+  BrainCutIn,
+  validateBrainCutInRuntimeSnapshot,
+  validateFrontierParticlesRuntimeSnapshot,
+  type BrainCutInRuntimeSnapshot,
+  type FrontierParticles,
+  type FrontierParticlesRuntimeSnapshot,
+} from './effects.ts';
+import {
+  BlockWipe,
+  LineWipe,
+  validateBlockWipeRuntimeSnapshot,
+  validateLineWipeRuntimeSnapshot,
+  type BlockWipeRuntimeSnapshot,
+  type LineLayer,
+  type LineWipeRuntimeSnapshot,
+} from './wipes.ts';
 
 /** Decomp DIR_NORTH..DIR_EAST, the 2D objects' directions. */
 const DIRS = ['up', 'down', 'left', 'right'] as const;
@@ -78,12 +93,34 @@ const ANIM = [
 /** Decomp ov63_0222D110's v2: the walking types whose animation frame is kept when another type interrupts them. */
 const KEEPS_FRAME = [false, false, true, false, true, true, true, true, true, false];
 
+interface AnimRuntimeSnapshot {
+  seq: number;
+  frame: number;
+  time: number;
+}
+
 /** A playing NNS cell animation: its sequence, frame and the time spent in that frame. */
 class Anim {
   seq = -1;
   frame = 0;
   time = 0;
   constructor(private readonly sequences: readonly Ui2dAnimation[]) {}
+
+  captureRuntimeSnapshot(): AnimRuntimeSnapshot {
+    return {
+      seq: this.seq,
+      frame: this.frame,
+      time: this.time,
+    };
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: AnimRuntimeSnapshot,
+  ): void {
+    this.seq = snapshot.seq;
+    this.frame = snapshot.frame;
+    this.time = snapshot.time;
+  }
 
   /** Sprite_SetAnimNoRestart. */
   set(seq: number): void {
@@ -144,6 +181,27 @@ interface MovementTask {
   state: 0 | 2;
 }
 
+interface ActorRuntimeSnapshot {
+  localId: number;
+  gfx: number;
+  sheet: Id;
+  prev: { x: number; y: number };
+  cur: { x: number; y: number };
+  command: number;
+  dir: number;
+  frame: number;
+  frames: number;
+  visible: boolean;
+  task: MovementTask | null;
+  anim: AnimRuntimeSnapshot;
+  seen: { command: number; dir: number };
+  animType: number;
+  updates: number;
+  shownDir: number;
+  kept: { type: number; frame: number };
+  standOnly: boolean;
+}
+
 /** An actor (decomp ov63 object + its 2D sprite). Positions are the object's (the sprite origin), in room px. */
 class Actor {
   /** Decomp unk_08 (where the command started) and unk_04 (where it ends). */
@@ -186,6 +244,69 @@ class Actor {
     this.anim = new Anim(sequences);
     // Decomp ov63_0222B0C0: the sprite starts on animation 1 (6 for a type-1 character), then follows its object.
     this.anim.restart(1);
+  }
+
+  captureRuntimeSnapshot(): ActorRuntimeSnapshot {
+    return {
+      localId: this.localId,
+      gfx: this.gfx,
+      sheet: this.sheet,
+      prev: { ...this.prev },
+      cur: { ...this.cur },
+      command: this.command,
+      dir: this.dir,
+      frame: this.frame,
+      frames: this.frames,
+      visible: this.visible,
+      task: this.task
+        ? structuredClone(this.task)
+        : null,
+      anim: this.anim.captureRuntimeSnapshot(),
+      seen: { ...this.seen },
+      animType: this.animType,
+      updates: this.updates,
+      shownDir: this.shownDir,
+      kept: { ...this.kept },
+      standOnly: this.standOnly,
+    };
+  }
+
+  static restoreRuntimeSnapshot(
+    snapshot: ActorRuntimeSnapshot,
+    sequences: readonly Ui2dAnimation[],
+  ): Actor {
+    const actor = new Actor(
+      snapshot.localId,
+      snapshot.gfx,
+      snapshot.sheet,
+      sequences,
+      snapshot.cur.x,
+      snapshot.cur.y,
+      snapshot.dir,
+      snapshot.visible,
+      snapshot.standOnly,
+    );
+
+    actor.prev = { ...snapshot.prev };
+    actor.cur = { ...snapshot.cur };
+    actor.command = snapshot.command;
+    actor.dir = snapshot.dir;
+    actor.frame = snapshot.frame;
+    actor.frames = snapshot.frames;
+    actor.visible = snapshot.visible;
+    actor.task = snapshot.task
+      ? structuredClone(snapshot.task)
+      : null;
+    actor.anim.restoreRuntimeSnapshot(
+      snapshot.anim,
+    );
+    actor.seen = { ...snapshot.seen };
+    actor.animType = snapshot.animType;
+    actor.updates = snapshot.updates;
+    actor.shownDir = snapshot.shownDir;
+    actor.kept = { ...snapshot.kept };
+
+    return actor;
   }
 
   get idle(): boolean {
@@ -273,6 +394,180 @@ interface ObjectSprite {
   tick: number;
 }
 
+interface ObjectSpriteRuntimeSnapshot {
+  id: number;
+  sheet: Id;
+  x: number;
+  y: number;
+  visible: boolean;
+  animating: boolean;
+  flip?: true;
+  anim: AnimRuntimeSnapshot;
+  tick: number;
+}
+
+export interface FrontierSceneRuntimeSnapshot {
+  kind: 'frontier-scene';
+  id: number;
+  loaded: number[];
+  actors: (ActorRuntimeSnapshot | null)[];
+  resources: number[];
+  sprites: (
+    | ObjectSpriteRuntimeSnapshot
+    | null
+  )[];
+  movements: number;
+  camera: { x: number; y: number };
+  fade: {
+    color: 'black' | 'white';
+    alpha: number;
+    anim: {
+      from: number;
+      to: number;
+      ticks: number;
+      elapsed: number;
+    } | null;
+  };
+  fgScroll: { x: number; y: number };
+  corridorFloor: boolean;
+  fgHidden: boolean;
+  fgBelow: boolean;
+  fgBlend: { a: number; b: number } | null;
+  shakeTask: {
+    x: number;
+    y: number;
+    frame: number;
+    every: number;
+    left: number;
+  } | null;
+  windowTask: {
+    rect: {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+    };
+    delay: number;
+    on: boolean;
+  } | null;
+  window: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null;
+  pokemon: {
+    id: number;
+    view: NonNullable<FrontierView['pokemon']>;
+  } | null;
+  infoWindow:
+    | NonNullable<FrontierView['infoWindow']>
+    | null;
+  bgPatch:
+    | NonNullable<FrontierView['bgPatch']>
+    | null;
+  bgDarken: number;
+  fgOverride: FrontierSceneData['fg'];
+  actorDarken: [number, number][];
+  icons: [
+    string,
+    NonNullable<
+      FrontierView['icons']
+    >[number],
+  ][];
+  brainCutIn: {
+    effect: BrainCutInRuntimeSnapshot;
+    name: string;
+  } | null;
+  wipe:
+    | BlockWipeRuntimeSnapshot
+    | LineWipeRuntimeSnapshot
+    | null;
+  spritesOnTop: boolean;
+  hallLights: {
+    frames: [Id, Id];
+    count: number;
+    next: number;
+    shown: Id;
+  } | null;
+  particles: FrontierParticlesRuntimeSnapshot;
+}
+
+const sceneRecord = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value);
+
+export function validateFrontierSceneRuntimeSnapshot(
+  value: unknown,
+): value is FrontierSceneRuntimeSnapshot {
+  if (
+    !sceneRecord(value) ||
+    value.kind !== 'frontier-scene' ||
+    !Number.isSafeInteger(value.id) ||
+    !Array.isArray(value.loaded) ||
+    !value.loaded.every(Number.isSafeInteger) ||
+    !Array.isArray(value.actors) ||
+    value.actors.length !== 32 ||
+    !value.actors.every(
+      (actor) =>
+        actor === null || sceneRecord(actor),
+    ) ||
+    !Array.isArray(value.resources) ||
+    !value.resources.every(Number.isSafeInteger) ||
+    !Array.isArray(value.sprites) ||
+    value.sprites.length !== 8 ||
+    !value.sprites.every(
+      (sprite) =>
+        sprite === null || sceneRecord(sprite),
+    ) ||
+    !Number.isSafeInteger(value.movements) ||
+    !sceneRecord(value.camera) ||
+    !sceneRecord(value.fade) ||
+    !sceneRecord(value.fgScroll) ||
+    typeof value.corridorFloor !== 'boolean' ||
+    typeof value.fgHidden !== 'boolean' ||
+    typeof value.fgBelow !== 'boolean' ||
+    !Array.isArray(value.actorDarken) ||
+    !Array.isArray(value.icons) ||
+    typeof value.spritesOnTop !== 'boolean' ||
+    !validateFrontierParticlesRuntimeSnapshot(
+      value.particles,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    value.brainCutIn !== null &&
+    (
+      !sceneRecord(value.brainCutIn) ||
+      typeof value.brainCutIn.name !== 'string' ||
+      !validateBrainCutInRuntimeSnapshot(
+        value.brainCutIn.effect,
+      )
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    value.wipe !== null &&
+    !validateBlockWipeRuntimeSnapshot(
+      value.wipe,
+    ) &&
+    !validateLineWipeRuntimeSnapshot(
+      value.wipe,
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export class FrontierScene {
   /**
    * Decomp unk_24: the 2D character graphics loaded (FrontierScrCmd_22), by gfx. It is the frontier app's (BattleFrontier
@@ -313,7 +608,14 @@ export class FrontierScene {
   /** The Arcade's Pokémon icons and item marks (BattleArcade_CreateMonSprites), by side and slot (`p0`, `o2`). */
   readonly icons = new Map<string, NonNullable<FrontierView['icons']>[number]>();
   /** A Frontier Brain's cut-in while it runs (FrontierScrCmd_PlayFrontierBrainEncounterEffect), with its view. */
-  brainCutIn: { effect: BrainCutIn; view: () => NonNullable<FrontierView['brainCutIn']> | null } | null = null;
+  brainCutIn: {
+    effect: BrainCutIn;
+    name: string;
+    view: () =>
+      NonNullable<
+        FrontierView['brainCutIn']
+      > | null;
+  } | null = null;
   /** A facility's pre-battle wipe while FrontierScrCmd_3F runs it. */
   wipe: BlockWipe | LineWipe | null = null;
   /** BattleCastleBattleRoomSceneSetup: BG0 (the particles) and BG2 at the sprites' priority, so under them. */
@@ -337,6 +639,279 @@ export class FrontierScene {
   ) {
     this.loaded = loaded;
     this.fade = { ...fade, anim: null };
+  }
+
+  captureRuntimeSnapshot(): FrontierSceneRuntimeSnapshot {
+    return {
+      kind: 'frontier-scene',
+      id: this.id,
+      loaded: [...this.loaded],
+      actors: this.actors.map((actor) =>
+        actor
+          ? actor.captureRuntimeSnapshot()
+          : null,
+      ),
+      resources: [...this.resources],
+      sprites: this.sprites.map((sprite) =>
+        sprite
+          ? {
+              id: sprite.id,
+              sheet: sprite.sheet,
+              x: sprite.x,
+              y: sprite.y,
+              visible: sprite.visible,
+              animating: sprite.animating,
+              ...(sprite.flip
+                ? { flip: true as const }
+                : {}),
+              anim:
+                sprite.anim.captureRuntimeSnapshot(),
+              tick: sprite.tick,
+            }
+          : null,
+      ),
+      movements: this.movements,
+      camera: { ...this.camera },
+      fade: structuredClone(this.fade),
+      fgScroll: { ...this.fgScroll },
+      corridorFloor: this.corridorFloor,
+      fgHidden: this.fgHidden,
+      fgBelow: this.fgBelow,
+      fgBlend: this.fgBlend
+        ? { ...this.fgBlend }
+        : null,
+      shakeTask: this.shakeTask
+        ? structuredClone(this.shakeTask)
+        : null,
+      windowTask: this.windowTask
+        ? structuredClone(this.windowTask)
+        : null,
+      window: this.window
+        ? { ...this.window }
+        : null,
+      pokemon: this.pokemon
+        ? structuredClone(this.pokemon)
+        : null,
+      infoWindow: this.infoWindow
+        ? structuredClone(this.infoWindow)
+        : null,
+      bgPatch: this.bgPatch
+        ? structuredClone(this.bgPatch)
+        : null,
+      bgDarken: this.bgDarken,
+      fgOverride: this.fgOverride
+        ? { ...this.fgOverride }
+        : null,
+      actorDarken: [...this.actorDarken],
+      icons: [...this.icons].map(
+        ([key, icon]) => [
+          key,
+          structuredClone(icon),
+        ],
+      ),
+      brainCutIn: this.brainCutIn
+        ? {
+            effect:
+              this.brainCutIn.effect.captureRuntimeSnapshot(),
+            name: this.brainCutIn.name,
+          }
+        : null,
+      wipe: this.wipe
+        ? this.wipe.captureRuntimeSnapshot()
+        : null,
+      spritesOnTop: this.spritesOnTop,
+      hallLights: this.hallLights
+        ? structuredClone(this.hallLights)
+        : null,
+      particles:
+        this.particles.captureRuntimeSnapshot(),
+    };
+  }
+
+  restoreRuntimeSnapshot(
+    value: unknown,
+  ): void {
+    if (
+      !validateFrontierSceneRuntimeSnapshot(
+        value,
+      )
+    ) {
+      throw new Error(
+        'Invalid Frontier scene runtime snapshot.',
+      );
+    }
+
+    if (value.id !== this.id) {
+      throw new Error(
+        `Frontier scene snapshot is for ${value.id}, not ${this.id}.`,
+      );
+    }
+
+    this.loaded.clear();
+    for (const gfx of value.loaded) {
+      this.loaded.add(gfx);
+    }
+
+    value.actors.forEach(
+      (snapshot, index) => {
+        this.actors[index] = snapshot
+          ? Actor.restoreRuntimeSnapshot(
+              snapshot,
+              this.animationsOf(snapshot.sheet),
+            )
+          : null;
+      },
+    );
+
+    this.resources.clear();
+    for (const resource of value.resources) {
+      this.resources.add(resource);
+    }
+
+    value.sprites.forEach(
+      (snapshot, index) => {
+        if (!snapshot) {
+          this.sprites[index] = null;
+          return;
+        }
+
+        const anim = new Anim(
+          this.animationsOf(snapshot.sheet),
+        );
+
+        anim.restoreRuntimeSnapshot(
+          snapshot.anim,
+        );
+
+        this.sprites[index] = {
+          id: snapshot.id,
+          sheet: snapshot.sheet,
+          x: snapshot.x,
+          y: snapshot.y,
+          visible: snapshot.visible,
+          animating: snapshot.animating,
+          ...(snapshot.flip
+            ? { flip: true }
+            : {}),
+          anim,
+          tick: snapshot.tick,
+        };
+      },
+    );
+
+    this.movements = value.movements;
+    this.camera = { ...value.camera };
+    this.fade = structuredClone(value.fade);
+    this.fgScroll = { ...value.fgScroll };
+    this.corridorFloor =
+      value.corridorFloor;
+    this.fgHidden = value.fgHidden;
+    this.fgBelow = value.fgBelow;
+    this.fgBlend = value.fgBlend
+      ? { ...value.fgBlend }
+      : null;
+    this.shakeTask = value.shakeTask
+      ? structuredClone(value.shakeTask)
+      : null;
+    this.windowTask = value.windowTask
+      ? structuredClone(value.windowTask)
+      : null;
+    this.window = value.window
+      ? { ...value.window }
+      : null;
+    this.pokemon = value.pokemon
+      ? structuredClone(value.pokemon)
+      : null;
+    this.infoWindow = value.infoWindow
+      ? structuredClone(value.infoWindow)
+      : null;
+    this.bgPatch = value.bgPatch
+      ? structuredClone(value.bgPatch)
+      : null;
+    this.bgDarken = value.bgDarken;
+    this.fgOverride = value.fgOverride
+      ? { ...value.fgOverride }
+      : null;
+
+    this.actorDarken.clear();
+    for (const [localId, fraction] of
+      value.actorDarken) {
+      this.actorDarken.set(
+        localId,
+        fraction,
+      );
+    }
+
+    this.icons.clear();
+    for (const [key, icon] of value.icons) {
+      this.icons.set(
+        key,
+        structuredClone(icon),
+      );
+    }
+
+    this.particles.restoreRuntimeSnapshot(
+      value.particles,
+    );
+
+    if (value.brainCutIn) {
+      const effect =
+        BrainCutIn.restoreRuntimeSnapshot(
+          value.brainCutIn.effect,
+          {
+            fade: (out, frames) =>
+              this.startFade(
+                out,
+                frames,
+                'white',
+              ),
+            fadeDone: () =>
+              this.fadeDone(),
+          },
+        );
+
+      const art = this.tables.effects;
+      const name = value.brainCutIn.name;
+
+      this.brainCutIn = {
+        effect,
+        name,
+        view: () =>
+          art
+            ? effect.view(
+                art,
+                name,
+                this.animationsOf,
+              )
+            : null,
+      };
+    } else {
+      this.brainCutIn = null;
+    }
+
+    if (
+      value.wipe?.kind === 'block-wipe'
+    ) {
+      this.wipe =
+        BlockWipe.restoreRuntimeSnapshot(
+          value.wipe,
+        );
+    } else if (
+      value.wipe?.kind === 'line-wipe'
+    ) {
+      this.wipe =
+        LineWipe.restoreRuntimeSnapshot(
+          value.wipe,
+        );
+    } else {
+      this.wipe = null;
+    }
+
+    this.spritesOnTop =
+      value.spritesOnTop;
+    this.hallLights = value.hallLights
+      ? structuredClone(value.hallLights)
+      : null;
   }
 
   /** Decomp FrontierScrCmd_22: loads a character's graphics (once per gfx). */

@@ -1,3 +1,8 @@
+import {
+  captureFrontierServiceRuntime,
+  restoreFrontierServiceRuntime,
+  type FrontierServiceRuntimeSnapshot,
+} from './frontier-runtime.ts';
 /**
  * The Battle Arcade's rules (decomp overlay 104 battle_arcade.c, battle_arcade_helpers.c, frscrcmd_battle_arcade.c;
  * overlay 108 battle_arcade_app main.c; arm9 battle_arcade_save.c, scrcmd_battle_arcade.c). Headless and
@@ -224,6 +229,11 @@ function applyOne(dex: Dex, party: Pokemon[], random: number, rand: Rand16, kind
  * One Battle Arcade challenge (decomp BattleArcade): alive from the frontier's InitBattleArcade to FreeBattleArcade.
  * Not saved itself: `save` writes its resumable part to `FrontierState.arcade.save`.
  */
+export type BattleArcadeRuntimeSnapshot =
+  FrontierServiceRuntimeSnapshot<
+    'battle-arcade'
+  >;
+
 export class BattleArcade {
   readonly challengeType: number;
   /** Decomp currentBattle (0–6), currentStreak, currentRound, saveStreak, seenArcadeStarIntro. */
@@ -303,6 +313,26 @@ export class BattleArcade {
   /** Decomp BattleArcade_Init(saveData, resumingFromSave, challengeType, partySlot1–3). */
   static init(state: GameState, registries: Registries, rand: Rand16, resume: boolean, challengeType: number, slots: number[]): BattleArcade {
     return new BattleArcade(state, registries, rand, resume, challengeType, slots);
+  }
+
+  captureRuntimeSnapshot(): BattleArcadeRuntimeSnapshot {
+    return captureFrontierServiceRuntime(
+      this,
+      'battle-arcade',
+      ['state', 'registries', 'rand'],
+    );
+  }
+
+  static restoreRuntimeSnapshot(
+    state: GameState, registries: Registries, rand: Rand16,
+    value: unknown,
+  ): BattleArcade {
+    return restoreFrontierServiceRuntime(
+      BattleArcade.prototype,
+      { state, registries, rand },
+      value,
+      'battle-arcade',
+    );
   }
 
   private get tables(): FrontierTables {

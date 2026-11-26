@@ -9,7 +9,6 @@ import { TextPrinter, toPrintOps } from '@opensinnoh/text';
 import { towerPartnerParam } from '../frontier-field-ops.ts';
 import type { Id } from '@opensinnoh/core';
 import { BRAIN_FACILITIES, BrainCutIn } from './effects.ts';
-import { BlockWipe, LineWipe } from './wipes.ts';
 import type { FrontierContext, FrontierHandler, FrontierRunner } from './runner.ts';
 
 /** Decomp BT_FUNC_* (constants/battle_tower_functions.h) the battle rooms call. */
@@ -129,59 +128,22 @@ export function towerFrontierHandlers(): Record<string, FrontierHandler> {
     fr_cmd_3f: (f, c, a) => {
       const type = f.val(c, a[0]);
       if (type > 4) throw new Error(`FrontierScrCmd_3F: wipe ${type} (the endless BG3 wave, used by no script) is not built`);
-      const flashes: [boolean, number][] = [
-        [true, 3],
-        [false, 3],
-        [true, 3],
-        [false, 3],
-      ];
-      let i = 0;
-      const flash = () => {
-        const [out, ticks] = flashes[i++]!;
-        f.scene.startFade(out, ticks, 'white');
-      };
-      flash();
-      let state: 'flash' | 'wipe' | 'end' = 'flash';
-      return f.pause(c, () => {
-        const scene = f.scene;
-        if (state === 'flash') {
-          if (!scene.fadeDone()) return false;
-          if (i < flashes.length) {
-            flash();
-            return false;
-          }
-          state = 'wipe';
-          if (type === 0) scene.startFade(true, 12, 'black');
-          else if (type === 1 || type === 2) {
-            scene.wipe = new BlockWipe(type === 1 ? 'rows' : 'columns');
-            return false;
-          } else {
-            scene.wipe = new LineWipe(type === 3 ? 1 : 2, scene.lineLayers());
-            scene.startFade(true, 40, 'black');
-          }
-        }
-        const wipe = scene.wipe;
-        if (state === 'wipe') {
-          if (type === 0) return scene.fadeDone();
-          if (wipe instanceof BlockWipe) {
-            // The step after the last block ends it (the default case of ov104_022311BC / 022312D8).
-            if (wipe.step()) state = 'end';
-            return false;
-          }
-          if (wipe instanceof LineWipe) {
-            wipe.step();
-            if (!scene.fadeDone()) return false;
-            wipe.bgHidden = true;
-            state = 'end';
-            return false;
-          }
-          throw new Error('FrontierScrCmd_3F: the wipe is gone');
-        }
-        // ov104_02231AA8: both screens black, the wipe's window and task freed.
-        scene.blackOut();
-        scene.wipe = null;
-        return true;
-      });
+      f.scene.startFade(
+        true,
+        3,
+        'white',
+      );
+
+      return f.pause(
+        c,
+        () => false,
+        {
+          kind: 'frontier-wipe',
+          wipeType: type,
+          flashIndex: 1,
+          phase: 'flash',
+        },
+      );
     },
     /**
      * Decomp FrontierScrCmd_PlayFrontierBrainEncounterEffect (frontier_brain_encounter_effect.c): the Brain's cut-in
@@ -200,15 +162,26 @@ export function towerFrontierHandlers(): Record<string, FrontierHandler> {
         if (!s?.animations) throw new Error(`frontier cut-in: sheet ${sheet} has no animations`);
         return s.animations;
       };
-      f.scene.brainCutIn = { effect, view: () => (art ? effect.view(art, name, animations) : null) };
+      f.scene.brainCutIn = {
+        effect,
+        name,
+        view: () =>
+          art
+            ? effect.view(
+                art,
+                name,
+                animations,
+              )
+            : null,
+      };
       const music = f.r.source('sequences', SEQ_PL_BA_BRAIN, false);
       if (music) f.r.audio.playBgm(music);
       else f.r.log.stub('audio:sequence-missing', `no sequence with sourceIndex ${SEQ_PL_BA_BRAIN} in the packs: not played`);
-      return f.pause(c, () => {
-        if (!effect.finished) return false;
-        f.scene.brainCutIn = null;
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'brain-cut-in' },
+      );
     },
     fr_free_tower_struct: (f) => {
       f.r.tower = null;
@@ -220,11 +193,11 @@ export function towerFrontierHandlers(): Record<string, FrontierHandler> {
       // Decomp BattleTower_GetBattleTypeFromChallengeMode: singles, doubles, or multi beside the AI partner.
       const topology = t.mode === 1 ? { topology: 'double' as const } : t.mode === 2 ? { topology: 'ai-partner' as const } : {};
       f.r.field.startBattle({ kind: 'trainer', trainers: [], wild: [], ...topology, frontier: t.battle() });
-      return f.pause(c, () => {
-        if (!f.r.field.battleDone()) return false;
-        f.afterSubApp();
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'battle-return' },
+      );
     },
     // Decomp FrontierScrCmd_BattleTower_CheckWonBattle (CheckPlayerWonBattle): anything but a loss or a draw.
     fr_battle_tower_check_won_battle: (f, c, a) => {
@@ -246,5 +219,9 @@ export function introMessage(f: FrontierRunner, c: FrontierContext, index: numbe
   if (!text) throw new Error(`frontier: no trainer message ${index}`);
   const printer = new TextPrinter(toPrintOps(text.text, f.slots), { speed: f.r.textSpeed(), canSpeedUp: true });
   f.r.ui.message = { printer };
-  return f.pause(c, () => printer.done);
+  return f.pause(
+    c,
+    () => false,
+    { kind: 'message' },
+  );
 }

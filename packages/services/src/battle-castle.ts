@@ -1,3 +1,8 @@
+import {
+  captureFrontierServiceRuntime,
+  restoreFrontierServiceRuntime,
+  type FrontierServiceRuntimeSnapshot,
+} from './frontier-runtime.ts';
 /**
  * The Battle Castle's rules (decomp overlay 104 battle_castle.c, battle_castle_helpers.c, frscrcmd_battle_castle.c,
  * frontier_opponents.c; overlay 107 battle_castle_app self_app.c and opponent_app.c; arm9 battle_castle_save.c,
@@ -211,6 +216,11 @@ export const noUnlocks = (): CastleUnlocks => ({ identity: [false, false, false,
  * One Battle Castle challenge (decomp BattleCastle): alive from the frontier's InitBattleCastle to FreeBattleCastle.
  * Not saved itself: `save` writes its resumable part to `FrontierState.castle.save`.
  */
+export type BattleCastleRuntimeSnapshot =
+  FrontierServiceRuntimeSnapshot<
+    'battle-castle'
+  >;
+
 export class BattleCastle {
   readonly challengeType: number;
   /** Decomp currentBattle (0–6), currentStreak, currentRound, saveStreak, seenCastleValetIntro, monFainted. */
@@ -290,6 +300,26 @@ export class BattleCastle {
   /** Decomp BattleCastle_Init(saveData, resumingFromSave, challengeType, partySlot1–3). */
   static init(state: GameState, registries: Registries, rand: Rand16, resume: boolean, challengeType: number, slots: number[]): BattleCastle {
     return new BattleCastle(state, registries, rand, resume, challengeType, slots);
+  }
+
+  captureRuntimeSnapshot(): BattleCastleRuntimeSnapshot {
+    return captureFrontierServiceRuntime(
+      this,
+      'battle-castle',
+      ['state', 'registries', 'rand'],
+    );
+  }
+
+  static restoreRuntimeSnapshot(
+    state: GameState, registries: Registries, rand: Rand16,
+    value: unknown,
+  ): BattleCastle {
+    return restoreFrontierServiceRuntime(
+      BattleCastle.prototype,
+      { state, registries, rand },
+      value,
+      'battle-castle',
+    );
   }
 
   private get tables(): FrontierTables {

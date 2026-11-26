@@ -34,6 +34,39 @@ type Talk = FollowerTalk;
 type Interaction = Talk['interactions'][number];
 type Step = Interaction['steps'][number];
 
+export interface FollowerTalkRuntimeSnapshot {
+  mood: number;
+  tile: string | null;
+  run: {
+    talk: Id;
+    mon: number;
+    interaction: number;
+    step: number;
+    state:
+      | 'start'
+      | 'motion'
+      | 'message'
+      | 'wait';
+    motion: {
+      frame: number;
+      tick: number;
+      dx: number;
+      dy: number;
+      dz: number;
+      facing:
+        GameState['player']['facing'];
+    } | null;
+    savedFacing:
+      GameState['player']['facing'];
+    waited: number;
+  } | null;
+  bubble: {
+    talk: Id;
+    sprite: Id;
+    tick: number;
+  } | null;
+}
+
 export interface FollowerTalkDeps {
   registries: Registries;
   state(): GameState;
@@ -221,6 +254,228 @@ export function followerTalk(d: FollowerTalkDeps) {
   };
 
   return {
+    captureRuntimeSnapshot():
+      FollowerTalkRuntimeSnapshot {
+      const activeTalk =
+        run?.talk ?? record();
+
+      if (bubble && !activeTalk) {
+        throw new Error(
+          'follower bubble has no talk record',
+        );
+      }
+
+      return structuredClone({
+        mood,
+        tile,
+        run: run
+          ? {
+              talk: run.talk.id,
+              mon:
+                d.state().party.indexOf(
+                  run.mon,
+                ),
+              interaction:
+                run.interaction.id,
+              step: run.step,
+              state: run.state,
+              motion: run.motion
+                ? {
+                    frame:
+                      run.motion.frame,
+                    tick:
+                      run.motion.tick,
+                    dx: run.motion.dx,
+                    dy: run.motion.dy,
+                    dz: run.motion.dz,
+                    facing:
+                      run.motion.facing,
+                  }
+                : null,
+              savedFacing:
+                run.savedFacing,
+              waited: run.waited,
+            }
+          : null,
+        bubble: bubble
+          ? {
+              talk: activeTalk!.id,
+              sprite: bubble.sprite,
+              tick: bubble.tick,
+            }
+          : null,
+      });
+    },
+    restoreRuntimeSnapshot(
+      value: unknown,
+    ): void {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        Array.isArray(value)
+      ) {
+        throw new Error(
+          'invalid follower-talk runtime snapshot',
+        );
+      }
+
+      const snapshot =
+        value as FollowerTalkRuntimeSnapshot;
+
+      if (
+        !Number.isSafeInteger(
+          snapshot.mood,
+        ) ||
+        snapshot.mood < -127 ||
+        snapshot.mood > 127 ||
+        (
+          snapshot.tile !== null &&
+          typeof snapshot.tile !== 'string'
+        )
+      ) {
+        throw new Error(
+          'invalid follower-talk runtime snapshot',
+        );
+      }
+
+      mood = snapshot.mood;
+      tile = snapshot.tile;
+
+      if (snapshot.run) {
+        const saved = snapshot.run;
+        const talk =
+          d.registries.followerTalk.get(
+            saved.talk,
+          );
+        const mon =
+          d.state().party[saved.mon];
+        const interaction =
+          talk?.interactions.find(
+            (candidate) =>
+              candidate.id ===
+              saved.interaction,
+          );
+
+        if (
+          !talk ||
+          !mon ||
+          !interaction ||
+          !Number.isSafeInteger(
+            saved.step,
+          ) ||
+          saved.step < 0 ||
+          saved.step >
+            interaction.steps.length ||
+          ![
+            'start',
+            'motion',
+            'message',
+            'wait',
+          ].includes(saved.state) ||
+          !Number.isSafeInteger(
+            saved.waited,
+          ) ||
+          saved.waited < 0
+        ) {
+          throw new Error(
+            'invalid follower-talk runtime snapshot',
+          );
+        }
+
+        let motion:
+          NonNullable<
+            NonNullable<typeof run>['motion']
+          > | null = null;
+
+        if (saved.motion) {
+          const motionId =
+            interaction.steps[
+              saved.step
+            ]?.motion;
+          const definition =
+            talk.motions.find(
+              (candidate) =>
+                candidate.id === motionId,
+            );
+
+          if (
+            !definition ||
+            ![
+              saved.motion.frame,
+              saved.motion.tick,
+              saved.motion.dx,
+              saved.motion.dy,
+              saved.motion.dz,
+            ].every(Number.isSafeInteger) ||
+            saved.motion.frame < 0 ||
+            saved.motion.frame >
+              definition.frames.length ||
+            saved.motion.tick < 0
+          ) {
+            throw new Error(
+              'invalid follower-talk motion snapshot',
+            );
+          }
+
+          motion = {
+            frames: definition.frames,
+            ...saved.motion,
+          };
+        }
+
+        run = {
+          talk,
+          mon,
+          interaction,
+          step: saved.step,
+          state: saved.state,
+          motion,
+          savedFacing:
+            saved.savedFacing,
+          waited: saved.waited,
+        };
+
+        if (motion) {
+          d.world().followerTalkPose({
+            dx: motion.dx,
+            dy: motion.dy,
+            dz: motion.dz,
+            facing: motion.facing,
+          });
+        }
+      } else {
+        run = null;
+      }
+
+      if (snapshot.bubble) {
+        const talk =
+          d.registries.followerTalk.get(
+            snapshot.bubble.talk,
+          );
+
+        if (
+          !talk ||
+          typeof snapshot.bubble.sprite !==
+            'string' ||
+          !Number.isSafeInteger(
+            snapshot.bubble.tick,
+          ) ||
+          snapshot.bubble.tick < 0
+        ) {
+          throw new Error(
+            'invalid follower bubble runtime snapshot',
+          );
+        }
+
+        bubble = {
+          sprite: snapshot.bubble.sprite,
+          tick: snapshot.bubble.tick,
+          frames: talk.emoteFrames,
+        };
+      } else {
+        bubble = null;
+      }
+    },
     /** A talk is running: the field takes no input, and nothing is saved. */
     active: () => run !== null || bubble !== null,
     /**

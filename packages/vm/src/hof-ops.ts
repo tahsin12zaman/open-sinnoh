@@ -11,11 +11,16 @@ export function hofHandlers(r: Runner): Record<string, Handler> {
   return {
     // Decomp ScrCmd_ClearGame → ClearGame (a field task that ends in OS_ResetSystem).
     clear_game: (_t, c) =>
-      r.openApp(c, { app: 'hall-of-fame', mode: 'record' }, () => {
-        throw new Error('clear_game: the script never resumes (the game resets after the credits)');
-      }),
+      r.openApp(
+        c,
+        { app: 'hall-of-fame', mode: 'record' },
+        {
+          kind: 'never-resume',
+          operation: 'clear_game',
+        },
+      ),
     // Decomp ScrCmd_OpenPCHallOfFameScreen: the viewer over the saved history; the script waits.
-    open_pc_hall_of_fame_screen: (_t, c) => r.openApp(c, { app: 'hall-of-fame', mode: 'pc' }, () => {}),
+    open_pc_hall_of_fame_screen: (_t, c) => r.openApp(c, { app: 'hall-of-fame', mode: 'pc' }, { kind: 'none' }),
     // Decomp ScrCmd_GetLeagueVictories: the newest entry's number (the total ever added); returns TRUE (yields).
     get_league_victories: (t, _c, a) => (r.setVar(t, r.ref(a[0], 'var'), r.state.hallOfFame.total), 'yield'),
     check_is_hall_of_fame_corrupted: (t, _c, a) => (r.setVar(t, r.ref(a[0], 'var'), 0), 'continue'),

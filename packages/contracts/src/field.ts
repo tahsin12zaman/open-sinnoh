@@ -430,6 +430,13 @@ export interface ScriptView {
   app: AppRequest | null;
 }
 
+export type RuntimeQuestion = {
+  kind: 'repel';
+  item: Id;
+  usedText: Id;
+  itemName: string;
+};
+
 /** The VM as seen by the world and the game loop. */
 export interface ScriptRunner {
   /** Starts the script thread; throws if one is already running. */
@@ -465,5 +472,11 @@ export interface ScriptRunner {
    * then the YES/NO box (A takes the cursor's answer, B is NO); `answer` runs once it closes. `running()` is true until
    * then; throws while a script runs.
    */
-  ask(text: Id, slots: string[], answer: (yes: boolean) => void): void;
+  ask(
+    text: Id,
+    slots: string[],
+    answer:
+      | ((yes: boolean) => void)
+      | RuntimeQuestion,
+  ): void;
 }

@@ -922,4 +922,49 @@ describe('in-place world runtime actor snapshots', () => {
     expect(g.state.player).toMatchObject({ x: 38, z: 15 });
     expect(snapshot.effects).toMatchObject({ nextKey: expect.any(Number), live: expect.any(Array) });
   });
+
+  it('restores the complete field world at the exact tick', () => {
+    const g = setup(newState('TOWN', 38, 16));
+    const runtime = g.world as typeof g.world & {
+      captureRuntimeSnapshot(): unknown;
+      validateRuntimeSnapshot(
+        value: unknown,
+      ): string | null;
+      restoreRuntimeSnapshot(value: unknown): void;
+    };
+
+    g.world.fade('out', 8, 'white');
+
+    for (let tick = 0; tick < 5; tick++) {
+      g.tick(['up']);
+    }
+
+    const state = structuredClone(g.state);
+    const snapshot =
+      runtime.captureRuntimeSnapshot();
+
+    expect(
+      runtime.validateRuntimeSnapshot(snapshot),
+    ).toBeNull();
+
+    for (let tick = 0; tick < 20; tick++) {
+      g.tick(['right']);
+    }
+
+    Object.assign(g.state, structuredClone(state));
+    runtime.restoreRuntimeSnapshot(snapshot);
+
+    expect(
+      runtime.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+    expect(g.state).toEqual(state);
+
+    // Restoring the same tick twice is idempotent.
+    runtime.restoreRuntimeSnapshot(snapshot);
+
+    expect(
+      runtime.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+    expect(g.state).toEqual(state);
+  });
 });

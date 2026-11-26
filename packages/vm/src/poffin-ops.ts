@@ -41,7 +41,7 @@ export function poffinHandlers(r: Runner): Record<string, Handler> {
         r.log.stub('stub:open_poffin_cooking:group', 'cooking Poffins in a group needs a wireless link (not supported)');
         return 'yield';
       }
-      return r.openApp(c, { app: 'poffin-cooking' }, () => {});
+      return r.openApp(c, { app: 'poffin-cooking' }, { kind: 'none' });
     },
     /** ScrCmd_GivePoffin (Poffin_MakePoffin, PoffinCase_AddPoffin): the Poffin's type, or POFFIN_NONE when the case is full. */
     give_poffin: (t, _c, a) => {

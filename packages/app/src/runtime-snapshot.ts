@@ -7,7 +7,10 @@ import {
   type RuntimeSnapshotReferences,
   type RuntimeSnapshotSubsystems,
   type RuntimeSnapshotTarget,
+  type World,
 } from '@opensinnoh/contracts';
+import type { Runner } from '@opensinnoh/vm';
+import type { Game } from '@opensinnoh/game';
 
 /** A subsystem owns its serializer and must reject snapshots it cannot safely restore. */
 export interface RuntimeSnapshotParticipant<T extends RuntimeJsonValue = RuntimeJsonValue> {
@@ -15,6 +18,112 @@ export interface RuntimeSnapshotParticipant<T extends RuntimeJsonValue = Runtime
   capture(): T;
   validate(payload: RuntimeJsonValue, references: RuntimeSnapshotReferences): string | null;
   restore(payload: T, references: RuntimeSnapshotReferences): void;
+}
+
+/**
+ * Logical sound timing belongs to the audio participant. Hardware
+ * playback is reissued by SoundSystem during restoration.
+ */
+export function audioSnapshotParticipant(
+  game: Game,
+): RuntimeSnapshotParticipant {
+  return {
+    id: 'audio',
+    capture: () =>
+      JSON.parse(
+        JSON.stringify(
+          game.sound
+            .captureRuntimeSnapshot(),
+        ),
+      ) as RuntimeJsonValue,
+    validate: (payload) =>
+      game.sound.validateRuntimeSnapshot(
+        payload,
+      )
+        ? null
+        : 'Invalid sound runtime snapshot.',
+    restore: (payload) =>
+      game.sound.restoreRuntimeSnapshot(
+        payload,
+      ),
+  };
+}
+
+/**
+ * Apps and battles are currently serialized by the game participant;
+ * render interpolation is serialized by the world participant. These
+ * markers make that ownership explicit in the envelope.
+ */
+export function ownedSnapshotParticipant(
+  id: 'apps' | 'battle' | 'render',
+): RuntimeSnapshotParticipant {
+  return {
+    id,
+    capture: () => null,
+    validate: (payload) =>
+      payload === null
+        ? null
+        : `Runtime subsystem "${id}" must use its owning participant.`,
+    restore: () => {},
+  };
+}
+
+/**
+ * The game participant owns GameState and the orchestration state
+ * that is not owned by world, VM, apps, battle, audio or render.
+ */
+export function gameSnapshotParticipant(
+  game: Game,
+): RuntimeSnapshotParticipant {
+  return {
+    id: 'game',
+    capture: () =>
+      game.captureRuntimeSnapshot(),
+    validate: (payload) =>
+      game.validateRuntimeSnapshot(payload),
+    restore: (payload) =>
+      game.restoreRuntimeSnapshot(payload),
+  };
+}
+
+/**
+ * The field world owns actors, map tasks, movement, fades and every
+ * transient field accumulator.
+ */
+export function worldSnapshotParticipant(
+  world: World,
+): RuntimeSnapshotParticipant {
+  return {
+    id: 'world',
+    capture: () =>
+      JSON.parse(
+        JSON.stringify(
+          world.captureRuntimeSnapshot(),
+        ),
+      ) as RuntimeJsonValue,
+    validate: (payload) =>
+      world.validateRuntimeSnapshot(payload),
+    restore: (payload) =>
+      world.restoreRuntimeSnapshot(payload),
+  };
+}
+
+/**
+ * The field script VM owns its complete runtime codec. The app only
+ * adapts it to the coordinator's participant interface.
+ */
+export function scriptRunnerSnapshotParticipant(
+  runner: Runner,
+): RuntimeSnapshotParticipant {
+  return {
+    id: 'vm',
+    capture: () =>
+      runner.captureRuntimeSnapshot(),
+    validate: (payload) =>
+      runner.validateRuntimeSnapshot(payload),
+    restore: (payload) =>
+      runner.restoreRuntimeSnapshot(payload),
+  };
 }
 
 /** The game supplies a tick-boundary lock; capture is never allowed during a partial tick. */
@@ -122,7 +231,11 @@ export class RuntimeSnapshotCoordinator {
           }
         }
         if (rollbackErrors.length) {
-          throw new AggregateError([cause, ...rollbackErrors], 'Runtime restore failed and rollback was incomplete.');
+          throw new AggregateError(
+            [cause, ...rollbackErrors],
+            'Runtime restore failed and rollback was incomplete.',
+            { cause },
+          );
         }
         throw cause;
       }

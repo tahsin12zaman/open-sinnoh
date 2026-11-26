@@ -20,10 +20,18 @@ export function galleryHandlers(r: Runner): Record<string, Handler> {
     scr_cmd_0a6: (t, c, a) => {
       const slot = r.val(t, a[0]);
       const dest = r.ref(a[1], 'var');
-      return r.openApp(c, { app: 'gallery-dress-up', slot, first: r.val(t, a[2]) === 1 }, (res) => {
-        if (res.app !== 'gallery-dress-up') throw new Error(`scr_cmd_0a6: got ${res.app}`);
-        r.setVar(t, dest, res.saved ? 1 : 0);
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'gallery-dress-up',
+          slot,
+          first: r.val(t, a[2]) === 1,
+        },
+        {
+          kind: 'gallery-saved',
+          variable: dest,
+        },
+      );
     },
     /** ScrCmd_SetDressUpPhotoTitle: photo slot 0's title, one Easy Chat word (DressUpPhoto_SetTitle). */
     set_dress_up_photo_title: (t, _c, a) => {
@@ -49,7 +57,7 @@ export function galleryHandlers(r: Runner): Record<string, Handler> {
         return 'continue';
       }
       r.setVar(t, dest, 0);
-      return r.openApp(c, { app: 'gallery-photo', slot }, () => {});
+      return r.openApp(c, { app: 'gallery-photo', slot }, { kind: 'none' });
     },
   };
 }

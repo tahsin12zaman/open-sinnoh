@@ -56,7 +56,7 @@ export function m5Handlers(r: Runner): Record<string, Handler> {
      * any other value sets it.
      */
     /** Decomp ScrCmd_StartLibraryTV: the library TV app (FieldSystem_StartLibraryTV); the script's ReturnToField waits for it. */
-    start_library_tv: (_t, c) => r.openApp(c, { app: 'library-tv' }, () => {}),
+    start_library_tv: (_t, c) => r.openApp(c, { app: 'library-tv' }, { kind: 'none' }),
 
     scr_cmd_2b6: (t, _c, a) => {
       r.field.setObjectPassThrough(r.val(t, a[0]), r.val(t, a[1]) !== 1);

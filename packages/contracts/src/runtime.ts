@@ -237,6 +237,12 @@ export type MapEntry = 'arrival' | 'load';
 export interface World extends FieldHost {
   /** Read-only view for the renderer. */
   view(): FieldView;
+  /** Exact transient field state at a tick boundary. */
+  captureRuntimeSnapshot(): unknown;
+  /** Returns a rejection reason, or null when restoration is safe. */
+  validateRuntimeSnapshot(value: unknown): string | null;
+  /** Restores transient field state without advancing simulation. */
+  restoreRuntimeSnapshot(value: unknown): void;
   /** Map load for state.player, following the load order in field.ts for an arrival or a loaded save. */
   enter(entry: MapEntry): void;
   /** Tick step 2 (called when no script runs): between steps, fires at most one trigger via the ScriptRunner. */

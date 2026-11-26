@@ -41,6 +41,18 @@ type Sprite = { anim: number; frame: number; x: number; y: number; shown: boolea
 
 const sin = (index: number) => Math.sin((index / TURN) * 2 * Math.PI);
 
+export interface UgTransitionRuntimeSnapshot {
+  part: UgTransitionPart;
+  gender: 'male' | 'female';
+  done: boolean;
+  state: number;
+  timer: number;
+  player: Sprite | null;
+  hole: Sprite | null;
+  index: number;
+  sub: number;
+}
+
 export class UgTransition {
   done = false;
   private state = 0;
@@ -56,6 +68,70 @@ export class UgTransition {
     private readonly gender: 'male' | 'female',
     private readonly h: UgTransitionHost,
   ) {}
+
+  capture(): UgTransitionRuntimeSnapshot {
+    return structuredClone({
+      part: this.part,
+      gender: this.gender,
+      done: this.done,
+      state: this.state,
+      timer: this.timer,
+      player: this.player,
+      hole: this.hole,
+      index: this.index,
+      sub: this.sub,
+    });
+  }
+
+  static restore(
+    h: UgTransitionHost,
+    snapshot: UgTransitionRuntimeSnapshot,
+  ): UgTransition {
+    if (
+      !Number.isSafeInteger(snapshot.state) ||
+      snapshot.state < 0 ||
+      !Number.isSafeInteger(snapshot.timer) ||
+      snapshot.timer < 0 ||
+      !Number.isSafeInteger(snapshot.index) ||
+      snapshot.index < 0 ||
+      !Number.isSafeInteger(snapshot.sub) ||
+      snapshot.sub < 0 ||
+      typeof snapshot.done !== 'boolean' ||
+      (snapshot.gender !== 'male' &&
+        snapshot.gender !== 'female')
+    ) {
+      throw new Error(
+        'invalid Underground transition runtime snapshot',
+      );
+    }
+
+    const transition = new UgTransition(
+      snapshot.part,
+      snapshot.gender,
+      h,
+    );
+
+    transition.done = snapshot.done;
+    transition.state = snapshot.state;
+    transition.timer = snapshot.timer;
+    transition.player =
+      structuredClone(snapshot.player);
+    transition.hole =
+      structuredClone(snapshot.hole);
+    transition.index = snapshot.index;
+    transition.sub = snapshot.sub;
+
+    return transition;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: UgTransitionRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      UgTransition.restore(this.h, snapshot),
+    );
+  }
 
   view(): UndergroundTransitionView | null {
     if (this.done) return null;

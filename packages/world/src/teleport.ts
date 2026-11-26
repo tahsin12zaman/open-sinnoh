@@ -134,6 +134,10 @@ export class TeleportTask {
       },
     );
 
+    host.cutIn.restoreRuntimeSnapshot(
+      snapshot.cutIn,
+    );
+
     task.phase = snapshot.phase;
     task.spin = snapshot.spin
       ? Spin.restore(snapshot.spin)
@@ -145,6 +149,15 @@ export class TeleportTask {
     task.done = snapshot.done;
 
     return task;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: RuntimeTeleportTaskSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      TeleportTask.restore(snapshot, this.h),
+    );
   }
 
   private runSpin(): void {

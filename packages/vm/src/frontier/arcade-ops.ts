@@ -130,10 +130,11 @@ export function arcadeFrontierHandlers(): Record<string, FrontierHandler> {
       const t = arcade(f);
       const { randomCursor } = t.beforeBoard();
       const request = { app: 'arcade' as const, challengeType: t.challengeType, round: t.round, streak: t.streak, performance: t.performance, speed: t.speed, randomCursor, party: t.players.map((m) => structuredClone(m)), opponents: t.opponents.map((m) => structuredClone(m)) };
-      return f.openApp(c, request, (result) => {
-        if (result.app !== 'arcade') throw new Error(`fr_open_battle_arcade_app: got a ${result.app} result`);
-        t.setAppResult(result.effect, result.cursor, result.random);
-      });
+      return f.openApp(
+        c,
+        request,
+        { kind: 'arcade' },
+      );
     },
     fr_apply_arcade_effect: (f) => (arcade(f).applyEffect(), 'yield'),
     fr_battle_arcade_setup_first_opponent: (f) => (arcade(f).setupOpponentsParty(), 'continue'),
@@ -143,11 +144,11 @@ export function arcadeFrontierHandlers(): Record<string, FrontierHandler> {
     fr_battle_arcade_start_battle: (f, c) => {
       const t = arcade(f);
       f.r.field.startBattle({ kind: 'trainer', trainers: [], wild: [], ...(t.challengeType === 1 ? { topology: 'double' as const } : {}), frontier: t.battleSetup() });
-      return f.pause(c, () => {
-        if (!f.r.field.battleDone()) return false;
-        f.afterSubApp();
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'battle-return' },
+      );
     },
     fr_battle_arcade_cleanup_battle: (f) => {
       const result = f.r.field.battleDone();

@@ -28,6 +28,8 @@ import {
   trainerIdFor,
   type AppHost,
   type AppModel,
+  type AppRequest,
+  type AppResult,
   type AppView,
   type Battle,
   type BattleChoice,
@@ -44,6 +46,8 @@ import {
   type GameSnapshot,
   type GameState,
   type InputFrame,
+  type RuntimeInputSnapshot,
+  type RuntimeJsonValue,
   type Labels,
   type MapEntry,
   type MapPopupView,
@@ -73,7 +77,10 @@ import {
 } from '@opensinnoh/contracts';
 import { elapseBerryMinutes, newBerryPatches, scoreBattle, scoreCatch, shayminClockRevert, shayminToLand } from '@opensinnoh/services';
 import { repelPrompt } from './repel-prompt.ts';
-import { followerTalk } from './follower-talk.ts';
+import {
+  followerTalk,
+  type FollowerTalkRuntimeSnapshot,
+} from './follower-talk.ts';
 import { digDestination, fieldMoveError, fieldMoveStart, flyDestination, isTaskMove, teleportDestination, usableFieldMoves } from './field-moves.ts';
 import { applyButtonMode, InputState } from './input.ts';
 import { fieldItemCheck, useFieldItem, useRegisteredItem } from './field-items.ts';
@@ -179,6 +186,88 @@ const FIELD_APPS: ReadonlySet<string> = new Set(['start-menu', 'save', 'mart', '
 /** The blackout screen's fades (decomp sub_020529C4: StartScreenFade 8 steps of 1 frame each way; ExecScreenFade runs once a tick). */
 const BLACK_OUT_FADE = 8;
 
+export type BattleReplayEvent =
+  | { kind: 'step'; input: InputFrame }
+  | { kind: 'choose'; choice: BattleChoice }
+  | { kind: 'app-done'; result: AppResult }
+  | { kind: 'idle' };
+
+export interface BattleReplayRuntimeSnapshot {
+  setup: BattleSetup;
+  seed: number;
+  started: boolean;
+  redHp: { flag: number; delay: number };
+  initialSound: ReturnType<
+    SoundSystem['captureRuntimeSnapshot']
+  >;
+  events: BattleReplayEvent[];
+}
+
+export interface AppReplayRuntimeSnapshot {
+  request: AppRequest;
+  initialState: GameState;
+  initialSound:
+    | ReturnType<
+        SoundSystem['captureRuntimeSnapshot']
+      >
+    | null;
+  frames: InputFrame[];
+  script: boolean;
+  evolution: boolean;
+  underground: boolean;
+  journalRoll: JournalDate | null;
+}
+
+export interface GameRuntimeSnapshot {
+  kind: 'game-runtime';
+  state: GameState;
+  input: RuntimeInputSnapshot;
+  seed: number;
+  newGameOptions: NewGameOptions | null;
+  yHeld: number | null;
+  battles: BattleLogEntry[];
+  textSpeed: TextSpeedOption;
+  lastResult: BattleResult | null;
+  battle: BattleReplayRuntimeSnapshot | null;
+  app: AppReplayRuntimeSnapshot | null;
+  wildBattles: WildBattleMode;
+  evolutions: EvolutionMode;
+  blackOut: {
+    phase: 'pending' | 'screen' | 'warping';
+    label: Id;
+    text: string;
+    t: number;
+    out: boolean;
+  } | null;
+  clear:
+    | (ClearPhase & { skippable: boolean })
+    | null;
+  clearSave: SaveEnvelope | null;
+  hasSave: boolean;
+  lastSave: SaveEnvelope | null;
+  evolving: number[];
+  pendingMenu: boolean;
+  seen: { zone: Id; loads: number } | null;
+  heard: { zone: Id; loads: number };
+  pendingFieldMove: {
+    slot: number;
+    move: Id;
+    location?: number;
+  } | null;
+  pendingFieldItem: Id | null;
+  quitRequest: boolean;
+  popup: ReturnType<
+    MapPopupState['captureRuntimeSnapshot']
+  >;
+  talk: FollowerTalkRuntimeSnapshot;
+  repel: { pending: boolean };
+  clock: ClockTime;
+  wildDefeats: {
+    loads: number;
+    count: number;
+  };
+}
+
 export interface Game {
   readonly registries: Registries;
   readonly labels: Labels;
@@ -229,6 +318,13 @@ export interface Game {
   /** One tick with an input frame sampled elsewhere (the app's own input sources); same order as `tick`. */
   step(frame: InputFrame): void;
   advance(ticks: number): void;
+  captureRuntimeSnapshot(): RuntimeJsonValue;
+  validateRuntimeSnapshot(
+    value: RuntimeJsonValue,
+  ): string | null;
+  restoreRuntimeSnapshot(
+    value: RuntimeJsonValue,
+  ): void;
   snapshot(): GameSnapshot;
   /** No script runs, the world is idle and no menu app is open. */
   canSave(): boolean;
@@ -401,6 +497,7 @@ export function createGame(options: GameOptions): Game {
     contestLoading ??= options.loadContestAnimation().then(
       (create) => {
         contestAnimation = create;
+        contestLoading = null;
       },
       (e: unknown) => {
         contestLoadError = e instanceof Error ? e : new Error(String(e));
@@ -410,8 +507,18 @@ export function createGame(options: GameOptions): Game {
     );
     return contestLoading;
   };
-  /** The battle started by `FieldHost.startBattle`: its setup and seed, and the engine's battle once created. */
-  let battle: { setup: BattleSetup; seed: number; run: Battle | null; redHp: { flag: number; delay: number } } | null = null;
+  /** The battle started by `FieldHost.startBattle`: its setup, deterministic replay log and live engine. */
+  let battle: {
+    setup: BattleSetup;
+    seed: number;
+    run: Battle | null;
+    redHp: { flag: number; delay: number };
+    initialSound: ReturnType<
+      SoundSystem['captureRuntimeSnapshot']
+    >;
+    events: BattleReplayEvent[];
+  } | null = null;
+  let replayingBattle = false;
   let lastResult: BattleResult | null = null;
   let wildBattles: WildBattleMode = 'battle';
   let evolutions: EvolutionMode = 'manual';
@@ -428,6 +535,7 @@ export function createGame(options: GameOptions): Game {
     loading ??= options.loadBattle().then(
       (create) => {
         engine = create;
+        loading = null;
       },
       (e: unknown) => {
         // Fail loudly at the next battle tick (a stale build after a deploy cannot fetch its chunk), not a frozen battle.
@@ -444,7 +552,22 @@ export function createGame(options: GameOptions): Game {
    * battle. Not saved (saves happen without one).
    */
   /** `journalRoll`: the journal the load opened (Journal_CheckOpenOnContinue); today's page opens when it closes. */
-  let app: { model: AppModel; name: string; script: boolean; evolution?: true; underground?: true; journalRoll?: JournalDate } | null = null;
+  let app: {
+    model: AppModel;
+    request: AppRequest;
+    name: string;
+    script: boolean;
+    evolution?: true;
+    underground?: true;
+    journalRoll?: JournalDate;
+    initialState: GameState;
+    initialSound:
+      | ReturnType<
+          SoundSystem['captureRuntimeSnapshot']
+        >
+      | null;
+    frames: InputFrame[];
+  } | null = null;
   /** The game clear (clear-game.ts): its phase and whether its credits may be skipped. Not saved (it ends in a reset). */
   let clear: (ClearPhase & { skippable: boolean }) | null = null;
   /** The save the clear wrote (kept across the reset for CONTINUE); also the Battle Tower's save before its reset. */
@@ -565,9 +688,17 @@ export function createGame(options: GameOptions): Game {
       }
       // Decomp: a wild Pokémon is seen when the battle starts.
       for (const w of setup.wild) markSeen(state, w.species, null);
-      battle = { setup, seed: rng(), run: null, redHp: { flag: 0, delay: 0 } };
+      const battleSeed = rng();
       // EncEffects_BGM: the battle BGM starts with the encounter effect; the field BGM pauses.
       sound.playBattleBgm(sound.sequenceBySource(battleBgm(setup, registries)));
+      battle = {
+        setup,
+        seed: battleSeed,
+        run: null,
+        redHp: { flag: 0, delay: 0 },
+        initialSound: sound.captureRuntimeSnapshot(),
+        events: [],
+      };
       if (!engine) loadEngine().catch(() => {});
     };
     const worldDeps = { audio: sound, mapLoaded: (zone: Id, loads: number) => { sound.playForZone(zone); heard = { zone, loads }; }, registries, state, scripts, log, battleLog, battles: { start, done: () => lastResult, blackOut: startBlackOut }, clock, followers: () => device.options().followers === 0, followerWalkInPlace: () => device.options().followerStyle === 1, autoRun: () => device.options().autoRun === 0, hgssCharacter: () => device.options().character === 1 };
@@ -761,9 +892,33 @@ export function createGame(options: GameOptions): Game {
       return contestAnimation ?? undefined;
     },
   };
-  const openApp = (request: Parameters<CreateApp>[0], script: boolean) => {
+  const openApp = (request: AppRequest, script: boolean) => {
     if (!options.createApp) throw new Error(`no menu apps in this game (createApp): cannot open ${request.app}`);
-    app = { model: options.createApp(request, { registries, state, log, host }), name: request.app, script };
+    app = {
+      model: options.createApp(
+        request,
+        { registries, state, log, host },
+      ),
+      request: structuredClone(request),
+      name: request.app,
+      script,
+      initialState: cloneState(state),
+      initialSound: null,
+      frames: [],
+    };
+  };
+
+  const stepApp = (frame: InputFrame): AppResult | null => {
+    if (!app) {
+      throw new Error(
+        'cannot step an app when none is open',
+      );
+    }
+
+    app.initialSound ??=
+      sound.captureRuntimeSnapshot();
+    app.frames.push(structuredClone(frame));
+    return app.model.step(frame);
   };
   /**
    * Decomp BATTLE_STATE_CHECK_EVOLUTION (Battle_FindEvolvingPartyMember): the next party member that
@@ -909,6 +1064,12 @@ export function createGame(options: GameOptions): Game {
       });
     }
     b.run.step(frame);
+    if (!replayingBattle) {
+      b.events.push({
+        kind: 'step',
+        input: structuredClone(frame),
+      });
+    }
     lowHpBeep(b);
     // Decomp Pokedex_Encounter: a foe is seen with its form and gender once it is out (not in the frontier's
     // battles: BattleSystem_RecordSeenMon skips BATTLE_TYPE_FRONTIER).
@@ -1061,6 +1222,12 @@ export function createGame(options: GameOptions): Game {
     battleChoose(choice) {
       if (!battle?.run) throw new Error(`battleChoose: no battle is running (${JSON.stringify(choice)})`);
       battle.run.choose(choice);
+      if (!replayingBattle) {
+        battle.events.push({
+          kind: 'choose',
+          choice: structuredClone(choice),
+        });
+      }
       // A direct answer (replays, the card) closes the battle's bag or party sheet if it was open.
       if (app && !battle.run.app()) app = null;
     },
@@ -1135,10 +1302,19 @@ export function createGame(options: GameOptions): Game {
       if (battle) {
         // The battle's bag or party sheet takes the frame while open; its result answers the battle.
         if (app) {
-          const result = app.model.step(frame);
+          const result = stepApp(frame);
           if (result) {
             app = null;
             battle.run!.appDone(result);
+            if (!replayingBattle) {
+              battle.events.push({
+                kind: 'app-done',
+                result: structuredClone(result),
+              });
+            }
+          }
+          if (!replayingBattle) {
+            battle.events.push({ kind: 'idle' });
           }
           countTick();
           return;
@@ -1155,7 +1331,7 @@ export function createGame(options: GameOptions): Game {
           loadContestAnimation().catch(() => {});
           return;
         }
-        const result = app.model.step(frame);
+        const result = stepApp(frame);
         if (result) {
           const { script, evolution, underground, journalRoll } = app;
           app = null;
@@ -1262,6 +1438,500 @@ export function createGame(options: GameOptions): Game {
     advance(ticks) {
       if (!Number.isInteger(ticks) || ticks < 0) throw new Error(`advance: invalid tick count ${ticks}`);
       for (let i = 0; i < ticks; i++) game.tick();
+    },
+    captureRuntimeSnapshot() {
+      if (loading || contestLoading) {
+        throw new Error(
+          'cannot snapshot while an engine chunk is loading',
+        );
+      }
+
+      const payload: GameRuntimeSnapshot = {
+        kind: 'game-runtime',
+        state: cloneState(state),
+        input: input.capture(),
+        seed,
+        newGameOptions:
+          newGameOptions
+            ? structuredClone(
+                newGameOptions,
+              )
+            : null,
+        yHeld,
+        battles:
+          structuredClone(battles),
+        textSpeed,
+        lastResult:
+          structuredClone(lastResult),
+        app: app
+          ? {
+              request:
+                structuredClone(app.request),
+              initialState:
+                cloneState(app.initialState),
+              initialSound:
+                structuredClone(
+                  app.initialSound,
+                ),
+              frames:
+                structuredClone(app.frames),
+              script: app.script,
+              evolution:
+                app.evolution === true,
+              underground:
+                app.underground === true,
+              journalRoll:
+                structuredClone(
+                  app.journalRoll ?? null,
+                ),
+            }
+          : null,
+        battle: battle
+          ? {
+              setup: structuredClone(
+                battle.setup,
+              ),
+              seed: battle.seed,
+              started: battle.run !== null,
+              redHp: { ...battle.redHp },
+              initialSound:
+                structuredClone(
+                  battle.initialSound,
+                ),
+              events:
+                structuredClone(
+                  battle.events,
+                ),
+            }
+          : null,
+        wildBattles,
+        evolutions,
+        blackOut:
+          structuredClone(blackOut),
+        clear: structuredClone(clear),
+        clearSave:
+          structuredClone(clearSave),
+        hasSave,
+        lastSave:
+          structuredClone(lastSave),
+        evolving: [...evolving],
+        pendingMenu,
+        seen: seen ? { ...seen } : null,
+        heard: { ...heard },
+        pendingFieldMove:
+          structuredClone(
+            pendingFieldMove,
+          ),
+        pendingFieldItem,
+        quitRequest,
+        popup:
+          popup.captureRuntimeSnapshot(),
+        talk:
+          talk.captureRuntimeSnapshot(),
+        repel:
+          repel.captureRuntimeSnapshot(),
+        clock: structuredClone(clock()),
+        wildDefeats: {
+          loads: wildDefeats.loads,
+          count: wildDefeats.count,
+        },
+      };
+
+      return JSON.parse(
+        JSON.stringify(payload),
+      ) as RuntimeJsonValue;
+    },
+    validateRuntimeSnapshot(value) {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        Array.isArray(value) ||
+        value.kind !== 'game-runtime'
+      ) {
+        return 'Not a game runtime snapshot.';
+      }
+
+      const snapshot =
+        value as unknown as
+          GameRuntimeSnapshot;
+
+      if (
+        !Number.isSafeInteger(
+          snapshot.seed,
+        ) ||
+        !Number.isSafeInteger(
+          snapshot.state?.tick,
+        ) ||
+        !Array.isArray(snapshot.battles) ||
+        !Array.isArray(
+          snapshot.evolving,
+        ) ||
+        !snapshot.evolving.every(
+          Number.isSafeInteger,
+        ) ||
+        typeof snapshot.hasSave !==
+          'boolean' ||
+        typeof snapshot.pendingMenu !==
+          'boolean' ||
+        typeof snapshot.quitRequest !==
+          'boolean' ||
+        (snapshot.app !== null &&
+          (typeof snapshot.app !== 'object' ||
+            snapshot.app === null ||
+            typeof snapshot.app.request !==
+              'object' ||
+            snapshot.app.request === null ||
+            typeof snapshot.app.request.app !==
+              'string' ||
+            !Array.isArray(
+              snapshot.app.frames,
+            ) ||
+            !Number.isSafeInteger(
+              snapshot.app.initialState?.tick,
+            ) ||
+            typeof snapshot.app.script !==
+              'boolean' ||
+            typeof snapshot.app.evolution !==
+              'boolean' ||
+            typeof snapshot.app.underground !==
+              'boolean')) ||
+        (snapshot.battle !== null &&
+          (typeof snapshot.battle !==
+            'object' ||
+            !Number.isSafeInteger(
+              snapshot.battle.seed,
+            ) ||
+            typeof snapshot.battle.started !==
+              'boolean' ||
+            !Array.isArray(
+              snapshot.battle.events,
+            ) ||
+            !snapshot.battle.events.every(
+              (event) =>
+                event !== null &&
+                typeof event === 'object' &&
+                ['step', 'choose', 'app-done', 'idle']
+                  .includes(event.kind),
+            ) ||
+            (snapshot.battle.started &&
+              !snapshot.battle.events.some(
+                (event) =>
+                  event.kind === 'step',
+              ))))
+      ) {
+        return 'Game runtime counters or flags are invalid.';
+      }
+
+      if (
+        !['battle', 'flee', 'auto'].includes(
+          snapshot.wildBattles,
+        ) ||
+        ![
+          'manual',
+          'auto',
+          'cancel',
+        ].includes(snapshot.evolutions) ||
+        TEXT_FRAME_DELAY[
+          snapshot.textSpeed
+        ] === undefined
+      ) {
+        return 'Game runtime modes are invalid.';
+      }
+
+      try {
+        validateSave(
+          {
+            format: 'lantern-nds-save',
+            version: 1,
+            savedAt: now(),
+            state: snapshot.state,
+          },
+          registries,
+          loaded.order,
+          labels,
+        );
+      } catch (error) {
+        return `Game state is invalid: ${
+          error instanceof Error
+            ? error.message
+            : String(error)
+        }`;
+      }
+
+      return null;
+    },
+    restoreRuntimeSnapshot(value) {
+      const error =
+        game.validateRuntimeSnapshot(value);
+
+      if (error) throw new Error(error);
+
+      const snapshot =
+        structuredClone(
+          value,
+        ) as unknown as
+          GameRuntimeSnapshot;
+
+      const next =
+        cloneState(snapshot.state);
+      const live =
+        state as unknown as
+          Record<string, unknown>;
+
+      for (const key of Object.keys(live)) {
+        delete live[key];
+      }
+
+      Object.assign(state, next);
+
+      input.restore(snapshot.input);
+      seed = snapshot.seed;
+      newGameOptions =
+        snapshot.newGameOptions
+          ? structuredClone(
+              snapshot.newGameOptions,
+            )
+          : undefined;
+      yHeld = snapshot.yHeld;
+      battles = structuredClone(
+        snapshot.battles,
+      );
+      textSpeed = snapshot.textSpeed;
+      lastResult =
+        structuredClone(
+          snapshot.lastResult,
+        );
+
+      battle = null;
+      app = null;
+
+      if (snapshot.battle) {
+        const savedBattle =
+          structuredClone(snapshot.battle);
+        const finalSound =
+          sound.captureRuntimeSnapshot();
+
+        sound.restoreRuntimeSnapshot(
+          savedBattle.initialSound,
+        );
+
+        battle = {
+          setup: savedBattle.setup,
+          seed: savedBattle.seed,
+          run: null,
+          redHp: { flag: 0, delay: 0 },
+          initialSound:
+            savedBattle.initialSound,
+          events: [],
+        };
+
+        replayingBattle = true;
+
+        try {
+          for (const event of savedBattle.events) {
+            if (!battle) {
+              throw new Error(
+                'battle replay ended before its snapshot',
+              );
+            }
+
+            switch (event.kind) {
+              case 'step':
+                battleStep(event.input);
+                sound.tick();
+                break;
+
+              case 'choose':
+                if (!battle.run) {
+                  throw new Error(
+                    'battle replay choice has no running battle',
+                  );
+                }
+                battle.run.choose(event.choice);
+                if (app && !battle.run.app()) {
+                  app = null;
+                }
+                break;
+
+              case 'app-done':
+                if (!battle.run) {
+                  throw new Error(
+                    'battle replay app result has no running battle',
+                  );
+                }
+                app = null;
+                battle.run.appDone(event.result);
+                break;
+
+              case 'idle':
+                sound.tick();
+                break;
+            }
+          }
+
+          if (
+            savedBattle.started &&
+            !battle?.run
+          ) {
+            throw new Error(
+              'battle replay did not start its engine',
+            );
+          }
+
+          if (battle) {
+            battle.redHp = {
+              ...savedBattle.redHp,
+            };
+            battle.events =
+              structuredClone(
+                savedBattle.events,
+              );
+          }
+        } finally {
+          replayingBattle = false;
+          sound.restoreRuntimeSnapshot(
+            finalSound,
+          );
+        }
+      }
+
+      if (snapshot.app) {
+        if (!options.createApp) {
+          throw new Error(
+            `cannot restore app ${snapshot.app.request.app}: this game has no app factory`,
+          );
+        }
+
+        const savedApp =
+          structuredClone(snapshot.app);
+        const finalState = cloneState(state);
+        const finalSound =
+          sound.captureRuntimeSnapshot();
+        const liveState =
+          state as unknown as
+            Record<string, unknown>;
+
+        for (const key of Object.keys(liveState)) {
+          delete liveState[key];
+        }
+        Object.assign(
+          state,
+          cloneState(savedApp.initialState),
+        );
+
+        if (savedApp.initialSound) {
+          sound.restoreRuntimeSnapshot(
+            savedApp.initialSound,
+          );
+        }
+
+        const model = options.createApp(
+          savedApp.request,
+          { registries, state, log, host },
+        );
+
+        try {
+          for (const frame of savedApp.frames) {
+            const result = model.step(frame);
+            sound.tick();
+
+            if (result) {
+              throw new Error(
+                `app replay ${savedApp.request.app} closed before its snapshot`,
+              );
+            }
+          }
+        } finally {
+          for (const key of Object.keys(liveState)) {
+            delete liveState[key];
+          }
+          Object.assign(state, finalState);
+          sound.restoreRuntimeSnapshot(
+            finalSound,
+          );
+        }
+
+        app = {
+          model,
+          request:
+            structuredClone(savedApp.request),
+          name: savedApp.request.app,
+          script: savedApp.script,
+          ...(savedApp.evolution
+            ? { evolution: true as const }
+            : {}),
+          ...(savedApp.underground
+            ? { underground: true as const }
+            : {}),
+          ...(savedApp.journalRoll
+            ? {
+                journalRoll:
+                  structuredClone(
+                    savedApp.journalRoll,
+                  ),
+              }
+            : {}),
+          initialState:
+            cloneState(savedApp.initialState),
+          initialSound:
+            structuredClone(
+              savedApp.initialSound,
+            ),
+          frames:
+            structuredClone(savedApp.frames),
+        };
+      }
+
+      wildBattles =
+        snapshot.wildBattles;
+      evolutions = snapshot.evolutions;
+      blackOut =
+        structuredClone(snapshot.blackOut);
+      clear =
+        structuredClone(snapshot.clear);
+      clearSave =
+        structuredClone(
+          snapshot.clearSave,
+        );
+      hasSave = snapshot.hasSave;
+      lastSave =
+        structuredClone(snapshot.lastSave);
+      evolving = [...snapshot.evolving];
+      pendingMenu =
+        snapshot.pendingMenu;
+      seen = snapshot.seen
+        ? { ...snapshot.seen }
+        : null;
+      heard = { ...snapshot.heard };
+      pendingFieldMove =
+        structuredClone(
+          snapshot.pendingFieldMove,
+        );
+      pendingFieldItem =
+        snapshot.pendingFieldItem;
+      quitRequest =
+        snapshot.quitRequest;
+      popup.restoreRuntimeSnapshot(
+        snapshot.popup,
+      );
+      talk.restoreRuntimeSnapshot(
+        snapshot.talk,
+      );
+      repel.restoreRuntimeSnapshot(
+        snapshot.repel,
+      );
+
+      const frozen =
+        structuredClone(snapshot.clock);
+      clockSource = () => frozen;
+
+      Object.assign(wildDefeats, {
+        world,
+        loads:
+          snapshot.wildDefeats.loads,
+        count:
+          snapshot.wildDefeats.count,
+      });
     },
     snapshot: () => ({
       battles: structuredClone(battles),

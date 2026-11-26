@@ -122,10 +122,11 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
     /** ScrCmd_OpenBag: the one-pocket bag picks an item; the script waits. */
     open_bag: (_t, c, a) => {
       const pocket = BAG_POCKETS[r.int(a[0]) === 0 ? 0 : 1];
-      return r.openApp(c, { app: 'bag-pick', pocket }, (result) => {
-        if (result.app !== 'bag-pick') throw new Error(`open_bag: got a ${result.app} result`);
-        r.opState.sideBagPick = result.item;
-      });
+      return r.openApp(
+        c,
+        { app: 'bag-pick', pocket },
+        { kind: 'op-state', target: 'sideBagPick' },
+      );
     },
     /** ScrCmd_GetSelectedItem: the item picked, ITEM_NONE (0) for none. */
     get_selected_item: (t, _c, a) => {
@@ -188,18 +189,33 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
     check_has_learnable_reminder_moves: (t, _c, a) => (dest(t, a[0], reminderMoves(r.registries, partyMon('check_has_learnable_reminder_moves', val(t, a[1]))).length ? 1 : 0), 'continue'),
     open_move_reminder_menu: (t, c, a) => {
       const slot = val(t, a[0]);
-      return r.openApp(c, { app: 'move-reminder', slot, moves: reminderMoves(r.registries, partyMon('open_move_reminder_menu', slot)), tutor: false }, (result) => {
-        if (result.app !== 'move-reminder') throw new Error(`open_move_reminder_menu: got a ${result.app} result`);
-        r.opState.sideLearned = result.learned;
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'move-reminder',
+          slot,
+          moves: reminderMoves(
+            r.registries,
+            partyMon('open_move_reminder_menu', slot),
+          ),
+          tutor: false,
+        },
+        { kind: 'op-state', target: 'sideLearned' },
+      );
     },
     open_move_tutor_menu: (t, c, a) => {
       const slot = val(t, a[0]);
       partyMon('open_move_tutor_menu', slot);
-      return r.openApp(c, { app: 'move-reminder', slot, moves: [moveId(val(t, a[1]))], tutor: true }, (result) => {
-        if (result.app !== 'move-reminder') throw new Error(`open_move_tutor_menu: got a ${result.app} result`);
-        r.opState.sideLearned = result.learned;
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'move-reminder',
+          slot,
+          moves: [moveId(val(t, a[1]))],
+          tutor: true,
+        },
+        { kind: 'op-state', target: 'sideLearned' },
+      );
     },
     /** ScrCmd_CheckLearnedReminderMove / _TutorMove: 0 when a move was learned, 0xFF when the old moves stayed. */
     check_learned_reminder_move: (t, _c, a) => readLearned(t, a, 'check_learned_reminder_move'),
@@ -208,10 +224,11 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
     select_party_mon_move: (t, c, a) => {
       const slot = val(t, a[0]);
       partyMon('select_party_mon_move', slot);
-      return r.openApp(c, { app: 'summary-teach', slot, move: null }, (result) => {
-        if (result.app !== 'summary-teach') throw new Error(`select_party_mon_move: got a ${result.app} result`);
-        r.opState.sideMovePick = result.forget;
-      });
+      return r.openApp(
+        c,
+        { app: 'summary-teach', slot, move: null },
+        { kind: 'op-state', target: 'sideMovePick' },
+      );
     },
     /** ScrCmd_GetSelectedPartyMonMove: the move slot picked, MOVE_NOT_SELECTED for none. */
     get_selected_party_mon_move: (t, _c, a) => {
@@ -254,10 +271,17 @@ export function sideHandlers(r: Runner): Record<string, Handler> {
       addPoketchHistory(r.state, received);
       const period = dayPeriod(r.state.gameTime.now.hour);
       const background = period === 'morning' || period === 'day' ? 'day' : period === 'twilight' ? 'evening' : 'night';
-      return r.openApp(c, { app: 'trade', sent: structuredClone(sent), received: structuredClone(received), otName: tr.otName, background }, (result) => {
-        if (result.app !== 'trade') throw new Error(`start_npc_trade: got a ${result.app} result`);
-        r.audio.fadeToBgm(r.audio.effectiveBgm(r.state.player.zone));
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'trade',
+          sent: structuredClone(sent),
+          received: structuredClone(received),
+          otName: tr.otName,
+          background,
+        },
+        { kind: 'restore-field-bgm' },
+      );
     },
     finish_npc_trade: () => {
       loadedTrade('finish_npc_trade');

@@ -37,6 +37,27 @@ export interface BoatHost {
 
 type Phase = 'depart' | 'fade-out' | 'cinematic' | 'map' | 'done';
 
+export interface BoatTripRuntimeSnapshot {
+  phase: Phase;
+  speed: number;
+  speedTick: number;
+  distance: number;
+  pan: number;
+  shipOffset: Vec3;
+  cameraOffset: Vec3;
+  bridges: [number, number] | null;
+  bridgeReached: boolean;
+  cinematic: {
+    tick: number;
+    frames: number;
+  };
+  travelDir: number;
+  exit: Facing;
+  zone: Id;
+  x: number;
+  z: number;
+}
+
 export class BoatTrip {
   private phase: Phase;
   private speed = START_SPEED;
@@ -58,11 +79,80 @@ export class BoatTrip {
     private readonly zone: Id,
     private readonly x: number,
     private readonly z: number,
+    snapshot?: BoatTripRuntimeSnapshot,
   ) {
+    if (snapshot) {
+      this.phase = snapshot.phase;
+      this.speed = snapshot.speed;
+      this.speedTick = snapshot.speedTick;
+      this.distance = snapshot.distance;
+      this.pan = snapshot.pan;
+      this.shipOffset.splice(
+        0,
+        3,
+        ...snapshot.shipOffset,
+      );
+      this.cameraOffset.splice(
+        0,
+        3,
+        ...snapshot.cameraOffset,
+      );
+      this.bridges = snapshot.bridges
+        ? [...snapshot.bridges]
+        : null;
+      this.bridgeReached = snapshot.bridgeReached;
+      this.cinematic = { ...snapshot.cinematic };
+      return;
+    }
+
     if (travelDir === BOAT_TRAVEL_DIR.northToSouth || travelDir === BOAT_TRAVEL_DIR.westToEast) {
       h.ship();
       this.phase = 'depart';
     } else this.phase = 'fade-out';
+  }
+
+  capture(): BoatTripRuntimeSnapshot {
+    return structuredClone({
+      phase: this.phase,
+      speed: this.speed,
+      speedTick: this.speedTick,
+      distance: this.distance,
+      pan: this.pan,
+      shipOffset: this.shipOffset,
+      cameraOffset: this.cameraOffset,
+      bridges: this.bridges,
+      bridgeReached: this.bridgeReached,
+      cinematic: this.cinematic,
+      travelDir: this.travelDir,
+      exit: this.exit,
+      zone: this.zone,
+      x: this.x,
+      z: this.z,
+    });
+  }
+
+  static restore(
+    h: BoatHost,
+    snapshot: BoatTripRuntimeSnapshot,
+  ): BoatTrip {
+    return new BoatTrip(
+      h,
+      snapshot.travelDir,
+      snapshot.exit,
+      snapshot.zone,
+      snapshot.x,
+      snapshot.z,
+      snapshot,
+    );
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: BoatTripRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      BoatTrip.restore(this.h, snapshot),
+    );
   }
 
   view(): ShipSceneView | undefined {

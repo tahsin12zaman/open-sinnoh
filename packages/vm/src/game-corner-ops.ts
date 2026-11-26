@@ -4,9 +4,9 @@
  * streak check (ScrCmd_CheckBonusRoundStreak), the prizes (scrcmd_game_corner_prize.c) and the guitarist's Hidden Power
  * type (ov5_021F6454.c ScrCmd_CalcHiddenPowerType).
  */
-import { COINS_MAX, newGameRecord, saveTvSegment, SLOT, type SlotTables } from '@opensinnoh/contracts';
+import { COINS_MAX, newGameRecord, SLOT, type SlotTables } from '@opensinnoh/contracts';
 import { dailyRandomOf, STATS, type Arg, type Id } from '@opensinnoh/core';
-import { addToGameRecord, incrementTrainerScore, slotMode } from '@opensinnoh/services';
+import { incrementTrainerScore, slotMode } from '@opensinnoh/services';
 import { formatNumber, PADDING_SPACES } from './m1b-ops.ts';
 import type { Handler, Runner, Thread } from './runner.ts';
 
@@ -85,14 +85,24 @@ export function gameCornerHandlers(r: Runner): Record<string, Handler> {
       const before = r.state.coins;
       const start = r.state.tick;
       incrementTrainerScore(r.state, r.registries, SCORE_SLOTS);
-      return r.openApp(c, { app: 'slots', machine, mode, seed: r.rngSource().next() }, (result) => {
-        if (result.app !== 'slots') throw new Error(`scr_cmd_267: got a ${result.app} result`);
-        if (result.coins >= before + TV_COINS) saveTvSegment(r.state, { kind: 'slots', before, after: result.coins, spent: Math.floor((r.state.tick - start) / (30 * 60)) });
-        r.state.coins = result.coins;
-        addToGameRecord(r.state, r.registries, RECORD_BONUS_ROUNDS, result.rounds);
-        const streakVar = tables('scr_cmd_267').streakVar;
-        if (result.streak > r.getFieldVar(streakVar)) r.setFieldVar(streakVar, result.streak);
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'slots',
+          machine,
+          mode,
+          seed: r.rngSource().next(),
+        },
+        {
+          kind: 'slots-result',
+          before,
+          startTick: start,
+          tvCoins: TV_COINS,
+          bonusRecord: RECORD_BONUS_ROUNDS,
+          streakVariable:
+            tables('scr_cmd_267').streakVar,
+        },
+      );
     },
     // Decomp ScrCmd_CalcHiddenPowerType (CalcHiddenPowerTypeAndPower): 0xFFFF for the species that cannot learn it.
     calc_hidden_power_type: (t, _c, a) => {

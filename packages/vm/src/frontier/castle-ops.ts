@@ -107,11 +107,11 @@ export function castleFrontierHandlers(): Record<string, FrontierHandler> {
     fr_battle_castle_start_battle: (f, c) => {
       const t = castle(f);
       f.r.field.startBattle({ kind: 'trainer', trainers: [], wild: [], ...(t.challengeType === 1 ? { topology: 'double' as const } : {}), frontier: t.battleSetup() });
-      return f.pause(c, () => {
-        if (!f.r.field.battleDone()) return false;
-        f.afterSubApp();
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'battle-return' },
+      );
     },
     // Decomp FrontierScrCmd_BattleCastle_CleanupBattle: the battle's party back into the challenge's; CheckPlayerWonBattle.
     fr_battle_castle_cleanup_battle: (f) => {
@@ -279,9 +279,10 @@ export function castleFrontierHandlers(): Record<string, FrontierHandler> {
   function openApp(f: FrontierRunner, c: Parameters<FrontierHandler>[1], mode: 'self' | 'opponent'): ReturnType<FrontierHandler> {
     const t = castle(f);
     const request = { app: 'castle' as const, mode, challengeType: t.challengeType, party: t.players.map((m) => structuredClone(m)), opponents: t.opponents.map((m) => structuredClone(m)), unlocked: structuredClone(t.unlocked) };
-    return f.openApp(c, request, (result) => {
-      if (result.app !== 'castle') throw new Error(`fr_open_battle_castle_${mode}_app: got a ${result.app} result`);
-      t.setAppResult(result);
-    });
+    return f.openApp(
+      c,
+      request,
+      { kind: 'castle' },
+    );
   }
 }

@@ -20,14 +20,14 @@ export function sealHandlers(r: Runner): Record<string, Handler> {
       return 'continue';
     },
     /** CapsuleMenu_StartFieldTask: the editor runs and the script waits until it ends. */
-    open_seal_capsule_editor: (_t, c) => r.openApp(c, { app: 'capsule-editor' }, () => {}),
+    open_seal_capsule_editor: (_t, c) => r.openApp(c, { app: 'capsule-editor' }, { kind: 'none' }),
     /** Shop_Start(MART_TYPE_SEAL) with SunyshoreMarketDailyStocks[martID]; the greeting stays in the mart's box. */
     poke_mart_seal: (t, c, a) => {
       const seals = val(t, a[0]);
       if (!sealTables(r.registries).marts[seals]) throw new Error(`poke_mart_seal: no seal mart ${seals}`);
       const greeting = r.ui.message ? r.ui.message.printer.text() : null;
       r.ui.message = null;
-      return r.openApp(c, { app: 'mart', seals, greeting }, () => {});
+      return r.openApp(c, { app: 'mart', seals, greeting }, { kind: 'none' });
     },
     count_unique_seals_in_seal_case: (t, _c, a) => (dest(t, a[0], uniqueSeals(r.state.sealCase)), 'continue'),
   };

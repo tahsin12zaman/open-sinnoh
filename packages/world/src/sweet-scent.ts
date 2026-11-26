@@ -71,11 +71,35 @@ export class SweetScentTask {
       snapshot.slot,
     );
 
+    if (
+      (snapshot.cutIn === null) !==
+      (host.cutIn === null)
+    ) {
+      throw new Error(
+        'Sweet Scent cut-in differs from its runtime snapshot',
+      );
+    }
+
+    if (snapshot.cutIn && host.cutIn) {
+      host.cutIn.restoreRuntimeSnapshot(
+        snapshot.cutIn,
+      );
+    }
+
     task.phase = snapshot.phase;
     task.blend = { ...snapshot.blend };
     task.wait = snapshot.wait;
 
     return task;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: RuntimeSweetScentTaskSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      SweetScentTask.restore(snapshot, this.h),
+    );
   }
 
   /** The pink's alpha now (0 when none). */

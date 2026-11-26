@@ -33,8 +33,8 @@ export function journalHandlers(r: Runner): Record<string, Handler> {
       if (SCRIPT_EVENTS.has(type)) journalEvent(r.registries, r.state, type, param);
       return 'yield';
     },
-    show_diploma_sinnoh: (_t, c) => (diploma(r), r.openApp(c, { app: 'diploma', national: false }, () => {})),
-    show_diploma_national_dex: (_t, c) => (diploma(r), r.openApp(c, { app: 'diploma', national: true }, () => {})),
+    show_diploma_sinnoh: (_t, c) => (diploma(r), r.openApp(c, { app: 'diploma', national: false }, { kind: 'none' })),
+    show_diploma_national_dex: (_t, c) => (diploma(r), r.openApp(c, { app: 'diploma', national: true }, { kind: 'none' })),
   };
 }
 

@@ -19,7 +19,18 @@
 import { monGender, isShiny, type Id, type Pokemon } from '@opensinnoh/core';
 import { dexOf, type ActorView, type FollowerSprite, type GameState, type Registries, type Zone } from '@opensinnoh/contracts';
 import { WALK_NORMAL_TICKS } from './movement.ts';
-import { createActor, jump, walk, type Actor } from './npc.ts';
+import {
+  createActor,
+  jump,
+  walk,
+  type Actor,
+} from './npc.ts';
+import {
+  captureActorSnapshot,
+  restoreActorSnapshot,
+  validateActorSnapshot,
+  type ActorSnapshot,
+} from './actor-snapshot.ts';
 
 /** The party follower's ActorView.localId: outside the u8 range of event objects. */
 export const PARTY_FOLLOWER_LOCALID = 0x100;
@@ -70,6 +81,17 @@ export function followerLead(state: GameState): Pokemon | null {
   return state.party.find((m) => !m.isEgg && m.hp > 0) ?? null;
 }
 
+export interface PartyFollowerRuntimeSnapshot {
+  actor: ActorSnapshot | null;
+  talk: { dx: number; dy: number; dz: number } | null;
+  bubble: NonNullable<ActorView['bubble']> | null;
+  set: Id | null;
+  waiting: boolean;
+  heroTile: [number, number];
+  trail: [number, number][];
+  age: number;
+}
+
 export class PartyFollower {
   actor: Actor | null = null;
   /** While it talks (follower talk): its drawn offset from its tile, in world units, and the bubble over it. */
@@ -85,6 +107,92 @@ export class PartyFollower {
   private age = 0;
 
   constructor(private readonly h: PartyFollowerHost) {}
+
+  captureRuntimeSnapshot(): PartyFollowerRuntimeSnapshot {
+    return structuredClone({
+      actor: this.actor
+        ? captureActorSnapshot(this.actor)
+        : null,
+      talk: this.talk,
+      bubble: this.bubble,
+      set: this.set?.id ?? null,
+      waiting: this.waiting,
+      heroTile: this.heroTile,
+      trail: this.trail,
+      age: this.age,
+    });
+  }
+
+  validateRuntimeSnapshot(value: unknown): string | null {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
+      return 'Party follower snapshot is not an object.';
+    }
+
+    const snapshot =
+      value as Partial<PartyFollowerRuntimeSnapshot>;
+
+    if (
+      (snapshot.actor !== null &&
+        !validateActorSnapshot(snapshot.actor)) ||
+      (snapshot.actor === null) !==
+        (this.actor === null) ||
+      (snapshot.set !== null &&
+        (typeof snapshot.set !== 'string' ||
+          !this.h.reg.followers.has(snapshot.set))) ||
+      typeof snapshot.waiting !== 'boolean' ||
+      !Array.isArray(snapshot.heroTile) ||
+      snapshot.heroTile.length !== 2 ||
+      !snapshot.heroTile.every(Number.isSafeInteger) ||
+      !Array.isArray(snapshot.trail) ||
+      !snapshot.trail.every(
+        (tile) =>
+          Array.isArray(tile) &&
+          tile.length === 2 &&
+          tile.every(Number.isSafeInteger),
+      ) ||
+      !Number.isSafeInteger(snapshot.age) ||
+      (snapshot.age as number) < 0
+    ) {
+      return 'Party follower runtime fields are invalid.';
+    }
+
+    return null;
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    const error =
+      this.validateRuntimeSnapshot(value);
+
+    if (error) throw new Error(error);
+
+    const snapshot =
+      structuredClone(
+        value,
+      ) as PartyFollowerRuntimeSnapshot;
+
+    if (this.actor && snapshot.actor) {
+      restoreActorSnapshot(
+        this.actor,
+        snapshot.actor,
+      );
+    }
+
+    this.talk = snapshot.talk;
+    this.bubble = snapshot.bubble;
+    this.set = snapshot.set
+      ? this.h.reg.followers.get(snapshot.set)!
+      : null;
+    this.waiting = snapshot.waiting;
+    this.heroTile = [...snapshot.heroTile];
+    this.trail = snapshot.trail.map(
+      (tile) => [...tile],
+    );
+    this.age = snapshot.age;
+  }
 
   /** The set and sprite that should be out now, or null when none may follow. */
   private wanted(): { set: FollowerSprite; sprite: Id } | null {

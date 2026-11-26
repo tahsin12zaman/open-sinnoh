@@ -1,3 +1,8 @@
+import {
+  captureFrontierServiceRuntime,
+  restoreFrontierServiceRuntime,
+  type FrontierServiceRuntimeSnapshot,
+} from './frontier-runtime.ts';
 /**
  * The Battle Tower's rules (decomp unk_02049D08.c BattleTower_*, unk_0204AEE8.c, unk_0206B9D8.c, wifi_battle_tower_save.c;
  * overlay 104 ov104_022394A4.c, ov104_0223A0C4.c, frscrcmd_battle_tower.c). Headless and deterministic: the VM's
@@ -245,6 +250,11 @@ export interface TowerOpponent {
  * InitBattleTower to FreeBattleTower, through the frontier's battle rooms. Not saved: REST saves its resumable part to
  * `GameState.frontier.towerSave` (BT_FUNC_UNK_39) and the next InitBattleTower 1 rebuilds it.
  */
+export type BattleTowerRuntimeSnapshot =
+  FrontierServiceRuntimeSnapshot<
+    'battle-tower'
+  >;
+
 export class BattleTower {
   readonly mode: number;
   readonly partySize: number;
@@ -320,6 +330,26 @@ export class BattleTower {
   /** Decomp BattleTower_Init(saveData, resume, challengeMode). */
   static init(state: GameState, registries: Registries, resume: boolean, mode: number): BattleTower {
     return new BattleTower(state, registries, mode, resume);
+  }
+
+  captureRuntimeSnapshot(): BattleTowerRuntimeSnapshot {
+    return captureFrontierServiceRuntime(
+      this,
+      'battle-tower',
+      ['state', 'registries'],
+    );
+  }
+
+  static restoreRuntimeSnapshot(
+    state: GameState, registries: Registries,
+    value: unknown,
+  ): BattleTower {
+    return restoreFrontierServiceRuntime(
+      BattleTower.prototype,
+      { state, registries },
+      value,
+      'battle-tower',
+    );
   }
 
   private get f(): FrontierState {

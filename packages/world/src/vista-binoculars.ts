@@ -50,12 +50,50 @@ export interface BinocularsHost {
   playSe(source: number): void;
 }
 
+export interface VistaBinocularsRuntimeSnapshot {
+  state: number;
+  iris: {
+    from: number;
+    to: number;
+    t: number;
+  } | null;
+  irisValue: number | null;
+}
+
 export class VistaBinoculars {
   private state = 0;
   private iris: { from: number; to: number; t: number } | null = null;
   private irisValue: number | null = null;
 
   constructor(private readonly h: BinocularsHost) {}
+
+  capture(): VistaBinocularsRuntimeSnapshot {
+    return structuredClone({
+      state: this.state,
+      iris: this.iris,
+      irisValue: this.irisValue,
+    });
+  }
+
+  static restore(
+    h: BinocularsHost,
+    snapshot: VistaBinocularsRuntimeSnapshot,
+  ): VistaBinoculars {
+    const task = new VistaBinoculars(h);
+    task.state = snapshot.state;
+    task.iris = structuredClone(snapshot.iris);
+    task.irisValue = snapshot.irisValue;
+    return task;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: VistaBinocularsRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      VistaBinoculars.restore(this.h, snapshot),
+    );
+  }
 
   view(): LookoutView {
     return { pokemon: null, iris: this.irisValue };

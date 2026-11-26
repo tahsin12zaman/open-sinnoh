@@ -87,19 +87,37 @@ export function factoryFrontierHandlers(): Record<string, FrontierHandler> {
     // Decomp FrontierScrCmd_OpenBattleFactoryAppInitial: the rental app over the six rentals; its picks are kept.
     fr_open_battle_factory_app_initial: (f, c) => {
       const t = factory(f);
-      return f.openApp(c, { app: 'factory', mode: 'rent', rentals: t.players.map((m) => structuredClone(m)), count: 3 }, (result) => {
-        if (result.app !== 'factory' || !('picks' in result)) throw new Error('fr_open_battle_factory_app_initial: not a rental result');
-        t.setAppResult(result.picks);
-      });
+      return f.openApp(
+        c,
+        {
+          app: 'factory',
+          mode: 'rent',
+          rentals: t.players.map(
+            (mon) => structuredClone(mon),
+          ),
+          count: 3,
+        },
+        { kind: 'factory-rent' },
+      );
     },
     // Decomp FrontierScrCmd_OpenBattleFactoryAppForTrade: the player's three against the beaten trainer's.
     fr_open_battle_factory_app_for_trade: (f, c) => {
       const t = factory(f);
       t.setAppResult([0, 0, 0, 0, 0, 0]);
-      return f.openApp(c, { app: 'factory', mode: 'swap', rentals: t.players.map((m) => structuredClone(m)), offers: t.opponents.map((m) => structuredClone(m)) }, (result) => {
-        if (result.app !== 'factory' || !('swap' in result)) throw new Error('fr_open_battle_factory_app_for_trade: not a trade result');
-        t.setAppResult(result.swap ? [...result.swap] : [0xff, 0]);
-      });
+      return f.openApp(
+        c,
+        {
+          app: 'factory',
+          mode: 'swap',
+          rentals: t.players.map(
+            (mon) => structuredClone(mon),
+          ),
+          offers: t.opponents.map(
+            (mon) => structuredClone(mon),
+          ),
+        },
+        { kind: 'factory-swap' },
+      );
     },
     fr_add_selected_rentals_to_party: (f) => (factory(f).addRentals(), 'continue'),
     fr_battle_factory_setup_next_opponent: (f) => (factory(f).setupNextOpponent(), 'continue'),
@@ -110,11 +128,11 @@ export function factoryFrontierHandlers(): Record<string, FrontierHandler> {
     fr_battle_factory_start_battle: (f, c) => {
       const t = factory(f);
       f.r.field.startBattle({ kind: 'trainer', trainers: [], wild: [], ...(t.challengeType === 1 ? { topology: 'double' as const } : {}), frontier: t.battleSetup() });
-      return f.pause(c, () => {
-        if (!f.r.field.battleDone()) return false;
-        f.afterSubApp();
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'battle-return' },
+      );
     },
     // Decomp FrontierScrCmd_BattleFactory_CleanupBattle: CheckPlayerWonBattle (anything but a loss or a draw).
     fr_battle_factory_cleanup_battle: (f) => {

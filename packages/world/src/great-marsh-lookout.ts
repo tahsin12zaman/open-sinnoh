@@ -46,6 +46,25 @@ export interface LookoutView {
   iris: number | null;
 }
 
+export interface GreatMarshLookoutRuntimeSnapshot {
+  spots: {
+    zone: Id | null;
+    x: number;
+    z: number;
+    facing: Facing;
+  }[];
+  views: number;
+  state: number;
+  timer: number;
+  iris: {
+    from: number;
+    to: number;
+    t: number;
+  } | null;
+  irisValue: number | null;
+  pokemon: LookoutView['pokemon'];
+}
+
 export class GreatMarshLookout {
   private readonly spots: { zone: Id | null; x: number; z: number; facing: Facing }[];
   private views = 0;
@@ -55,7 +74,21 @@ export class GreatMarshLookout {
   private irisValue: number | null = null;
   private pokemon: LookoutView['pokemon'] = null;
 
-  constructor(private readonly h: LookoutHost) {
+  constructor(
+    private readonly h: LookoutHost,
+    snapshot?: GreatMarshLookoutRuntimeSnapshot,
+  ) {
+    if (snapshot) {
+      this.spots = structuredClone(snapshot.spots);
+      this.views = snapshot.views;
+      this.state = snapshot.state;
+      this.timer = snapshot.timer;
+      this.iris = structuredClone(snapshot.iris);
+      this.irisValue = snapshot.irisValue;
+      this.pokemon = structuredClone(snapshot.pokemon);
+      return;
+    }
+
     const g = greatMarsh(h.reg);
     if (!g) throw new Error('great marsh lookout: the packs have no Great Marsh (NewGame.greatMarsh)');
     const p = h.state.player;
@@ -65,6 +98,34 @@ export class GreatMarshLookout {
       return { zone: null, x: s.x, z: s.z, facing: 'up' as Facing };
     });
     this.spots.push({ zone: p.zone, x: p.x, z: p.z, facing: 'up' });
+  }
+
+  capture(): GreatMarshLookoutRuntimeSnapshot {
+    return structuredClone({
+      spots: this.spots,
+      views: this.views,
+      state: this.state,
+      timer: this.timer,
+      iris: this.iris,
+      irisValue: this.irisValue,
+      pokemon: this.pokemon,
+    });
+  }
+
+  static restore(
+    h: LookoutHost,
+    snapshot: GreatMarshLookoutRuntimeSnapshot,
+  ): GreatMarshLookout {
+    return new GreatMarshLookout(h, snapshot);
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: GreatMarshLookoutRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      GreatMarshLookout.restore(this.h, snapshot),
+    );
   }
 
   view(): LookoutView {

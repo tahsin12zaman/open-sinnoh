@@ -1,5 +1,4 @@
 import { newGameRecord } from '@opensinnoh/contracts';
-import { SpearPillarApplication } from './spear-app.ts';
 /**
  * Story scene commands (docs/research/story-scenes.md): `scr_cmd_29f`, the explosion's camera shake (decomp
  * ScrCmd_29F → ov6_0223E384 / ov6_0223E4EC, overlay006 ov6_0223E140.c). A nested field task: the script waits.
@@ -63,8 +62,13 @@ export function sceneHandlers(r: Runner): Record<string, Handler> {
       return 'yield';
     },
     scr_cmd_2fb: (t, c) => {
-      const app = new SpearPillarApplication(r, t, data());
-      return r.pause(c, () => app.step());
+      r.startSpearApplication(t, data());
+
+      return r.pause(
+        c,
+        () => false,
+        { kind: 'spear-application' },
+      );
     },
     scr_cmd_18c: (t, _c, a) => {
       const facing = (['up', 'down', 'left', 'right'] as const)[r.val(t, a[1])];

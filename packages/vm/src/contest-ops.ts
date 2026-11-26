@@ -164,7 +164,7 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
       return 'continue';
     },
     /** ScrCmd_RunContestApplication: the rounds (and the results of a full contest) in the contest app. */
-    run_contest_application: (_t, c) => (session('run_contest_application'), r.openApp(c, { app: 'contest' }, () => {})),
+    run_contest_application: (_t, c) => (session('run_contest_application'), r.openApp(c, { app: 'contest' }, { kind: 'none' })),
     /** Contest_StartCameraFlashTask: the rank's (variant's) delays, a flash and the shutter after each. */
     start_contest_camera_flash_task: (t, _c, a) => {
       const sessionState = session(
@@ -235,10 +235,11 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
     /** ScrCmd_OpenPartyMenuForContest: the party in contest mode (rank Normal for a link's default rank). */
     open_party_menu_for_contest: (t, c, a) => {
       const rank = val(t, a[3]) ? 0 : val(t, a[1]);
-      return r.openApp(c, { app: 'contest-select', rank, type: val(t, a[2]) }, (res) => {
-        if (res.app !== 'contest-select') throw new Error(`open_party_menu_for_contest: got ${res.app}`);
-        r.opState.contestPick = res.slot;
-      });
+      return r.openApp(
+        c,
+        { app: 'contest-select', rank, type: val(t, a[2]) },
+        { kind: 'op-state', target: 'contestPick' },
+      );
     },
     /** ScrCmd_GetContestPartyMenuResult: the slot (PARTY_SLOT_NONE for none); SUMMARY runs inside the app, so never "show summary". */
     get_contest_party_menu_result: (t, _c, a) => {
@@ -259,7 +260,7 @@ export function contestHandlers(r: Runner): Record<string, Handler> {
         return 'continue';
       }
       dest(t, a[1], 0);
-      return r.openApp(c, { app: 'contest-photo', slot }, () => {});
+      return r.openApp(c, { app: 'contest-photo', slot }, { kind: 'none' });
     },
     /** ImageClipsSlotHasData(…, contest photos, slot). */
     contest_photo_has_data: (t, _c, a) => (dest(t, a[1], r.state.contestPhotos[val(t, a[0])] ? 1 : 0), 'continue'),

@@ -6,7 +6,7 @@
  * trainer score and the game records, card level, Pokédex completion, the signature app and the field money
  * window (decomp scrcmd_money.c).
  */
-import { JOURNAL_EVENT, journalEvent, journalMart } from '@opensinnoh/contracts';
+import { JOURNAL_EVENT } from '@opensinnoh/contracts';
 import { monGender, type Id, type Pokemon } from '@opensinnoh/core';
 import { dexOf, newGameRecord, STORAGE_MODES, tvRibbon } from '@opensinnoh/contracts';
 import { addToGameRecord, cardStars, incrementTrainerScore, localDexCompleted, nationalDexCompleted } from '@opensinnoh/services';
@@ -40,9 +40,11 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
     // The greeting stays drawn (close_message_without_erasing); the mart shows it in its own box.
     const greeting = r.ui.message ? r.ui.message.printer.text() : null;
     r.ui.message = null;
-    return r.openApp(c, { app: 'mart', mart, countVar, greeting }, (result) => {
-      if (result.app === 'mart') journalMart(r.registries, r.state, result.bought ?? 0, result.sold ?? 0);
-    });
+    return r.openApp(
+      c,
+      { app: 'mart', mart, countVar, greeting },
+      { kind: 'mart-journal' },
+    );
   };
 
   /**
@@ -84,16 +86,18 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
     update_money_display: () => ((moneyWindow('update_money_display').amount = moneyAmount()), 'continue'),
     // Decomp ScrCmd_SelectMoveTutorPokemon: the party menu in PARTY_MENU_MODE_SELECT_NO_PROMPT; the script waits.
     select_move_tutor_pokemon: (_t, c) =>
-      r.openApp(c, { app: 'party', mode: 'select' }, (result) => {
-        if (result.app !== 'party') throw new Error(`select_move_tutor_pokemon: got a ${result.app} result`);
-        r.opState.m3aPicked = result.slot;
-      }),
+      r.openApp(
+        c,
+        { app: 'party', mode: 'select' },
+        { kind: 'op-state', target: 'm3aPicked' },
+      ),
     // Decomp ScrCmd_OpenPartyMenuForTrade: PARTY_MENU_MODE_NPC_TRADE, which picks like SELECT_NO_PROMPT after the Ball Capsule check.
     open_party_menu_for_trade: (_t, c) =>
-      r.openApp(c, { app: 'party', mode: 'trade' }, (result) => {
-        if (result.app !== 'party') throw new Error(`open_party_menu_for_trade: got a ${result.app} result`);
-        r.opState.m3aPicked = result.slot;
-      }),
+      r.openApp(
+        c,
+        { app: 'party', mode: 'trade' },
+        { kind: 'op-state', target: 'm3aPicked' },
+      ),
     // Decomp ScrCmd_GetSelectedPartySlot: the picked slot, PARTY_SLOT_NONE when cancelled.
     get_selected_party_slot: (t, _c, a) => {
       if (r.opState.m3aPicked === undefined) throw new Error('get_selected_party_slot: no party menu ran before it');
@@ -145,9 +149,15 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
       // BoxAppMan_FlagRecordBoxUseInJournal: a session that changed the boxes or the party writes "used a PC box"
       // (the DS flags each move, deposit, withdrawal and release; inferred: any change of either).
       const before = JSON.stringify([r.state.boxes, r.state.party]);
-      return r.openApp(c, { app: 'storage', mode }, () => {
-        if (JSON.stringify([r.state.boxes, r.state.party]) !== before) journalEvent(r.registries, r.state, JOURNAL_EVENT.pcBox);
-      });
+      return r.openApp(
+        c,
+        { app: 'storage', mode },
+        {
+          kind: 'storage-journal',
+          before,
+          event: JOURNAL_EVENT.pcBox,
+        },
+      );
     },
     // Decomp ScrCmd_OpenPokemonNamingScreen → sub_0203DFE8: the party Pokémon's nickname; the var gets 1
     // when the name was left unchanged, else 0 and the nickname is set.
@@ -157,11 +167,23 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
       if (!mon) throw new Error(`open_pokemon_naming_screen: no Pokémon in party slot ${slot}`);
       const species = r.registries.species.get(mon.species)!.name;
       const pokemon = { species: mon.species, form: mon.form, gender: monGender(dexOf(r.registries), mon) };
-      return r.openApp(c, { app: 'naming', kind: 'pokemon', initial: mon.nickname ?? species, maxLength: MON_NAME_LEN, gender: r.state.gender, pokemon }, (result) => {
-        if (result.app !== 'naming') throw new Error(`open_pokemon_naming_screen: got a ${result.app} result`);
-        if (result.name !== null) mon.nickname = result.name === species ? null : result.name;
-        r.setVar(t, r.ref(a[1], 'var'), result.name === null ? 1 : 0);
-      });
+      return r.openApp(
+        c,
+        {
+          app: 'naming',
+          kind: 'pokemon',
+          initial: mon.nickname ?? species,
+          maxLength: MON_NAME_LEN,
+          gender: r.state.gender,
+          pokemon,
+        },
+        {
+          kind: 'pokemon-naming',
+          slot,
+          variable: r.ref(a[1], 'var'),
+          speciesName: species,
+        },
+      );
     },
     // Decomp ScrCmd_IncrementTrainerScore(2): the operand is a TRAINER_SCORE_EVENT_* number (the gyms: BADGE_EARNED).
     increment_trainer_score: (_t, _c, a) => (incrementTrainerScore(r.state, r.registries, r.int(a[0])), 'continue'),
@@ -175,7 +197,7 @@ export function m3aHandlers(r: Runner): Record<string, Handler> {
     check_local_dex_completed: (t, _c, a) => (r.setVar(t, r.ref(a[0], 'var'), localDexCompleted(r.state, r.registries) ? 1 : 0), 'continue'),
     check_national_dex_completed: (t, _c, a) => (r.setVar(t, r.ref(a[0], 'var'), nationalDexCompleted(r.state, r.registries) ? 1 : 0), 'continue'),
     // Decomp ScrCmd_StartSignatureApp: the signature app (the card's signing mode, without cancel); the script waits.
-    start_signature_app: (_t, c) => r.openApp(c, { app: 'signature' }, () => {}),
+    start_signature_app: (_t, c) => r.openApp(c, { app: 'signature' }, { kind: 'none' }),
     play_pokecenter_healing_animation: (t, c, a) => {
       // NOT DS behaviour: a quality-of-life change, as common ROM hacks do (docs/decisions.md
       // 2026-10-16). On the DS the nurse bows and the player keeps facing her (scripts_common.s

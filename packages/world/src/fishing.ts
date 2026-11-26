@@ -83,6 +83,20 @@ export class FishingTask {
     return task;
   }
 
+  restoreRuntimeSnapshot(
+    snapshot: RuntimeFishingTaskSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      FishingTask.restore(
+        snapshot,
+        this.next,
+        this.notice,
+        this.gotAway,
+      ),
+    );
+  }
+
   /** TRUE while task owns input. Messages are driven by the shared script notice, with fresh presses. */
   step(input: InputFrame, messageRunning: boolean): boolean {
     const a = input.pressed.includes('a');

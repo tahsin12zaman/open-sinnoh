@@ -15,13 +15,41 @@
  */
 import type { Arg, Command, Id } from '@opensinnoh/core';
 import { SplRandom } from '@opensinnoh/battle/particles';
-import type { AppRequest, AppResult, FrontierSceneData, FrontierTables, FrontierView, InputFrame, ParticleSystem, Ui2dAnimation } from '@opensinnoh/contracts';
+import type { AppRequest, FrontierSceneData, FrontierTables, FrontierView, InputFrame, ParticleSystem, Ui2dAnimation } from '@opensinnoh/contracts';
 import { newGameRecord } from '@opensinnoh/contracts';
-import type { BattleArcade, BattleCastle, BattleFactory, BattleHall, BattleTower } from '@opensinnoh/services';
+import {
+  TEXT_SPEED,
+  TextPrinter,
+  toPrintOps,
+} from '@opensinnoh/text';
+import {
+  MENU_RESULT,
+  NO_ALT_TEXT,
+  type MenuKind,
+} from '../menu.ts';
+import {
+  BattleArcade,
+  BattleCastle,
+  BattleFactory,
+  BattleHall,
+  type BattleArcadeRuntimeSnapshot,
+  type BattleCastleRuntimeSnapshot,
+  type BattleFactoryRuntimeSnapshot,
+  type BattleHallRuntimeSnapshot,
+  type BattleTower,
+} from '@opensinnoh/services';
 import type { Runner } from '../runner.ts';
 import { FRONTIER_VARS } from './commands.ts';
-import { FrontierScene } from './scene.ts';
+import {
+  FrontierScene,
+  validateFrontierSceneRuntimeSnapshot,
+  type FrontierSceneRuntimeSnapshot,
+} from './scene.ts';
 import { FrontierParticles } from './effects.ts';
+import {
+  BlockWipe,
+  LineWipe,
+} from './wipes.ts';
 import { frontierHandlers } from './ops.ts';
 import { towerFrontierHandlers } from './tower-ops.ts';
 import { factoryFrontierHandlers } from './factory-ops.ts';
@@ -30,8 +58,50 @@ import { castleFrontierHandlers } from './castle-ops.ts';
 import { arcadeFrontierHandlers } from './arcade-ops.ts';
 
 export type FrontierResult = 'continue' | 'yield';
-export type FrontierWait = (input: InputFrame) => boolean;
-export type FrontierHandler = (f: FrontierRunner, c: FrontierContext, args: Arg[]) => FrontierResult;
+export type FrontierWait =
+  (input: InputFrame) => boolean;
+
+export type FrontierAppContinuation =
+  | { kind: 'hall-board' }
+  | { kind: 'factory-rent' }
+  | { kind: 'factory-swap' }
+  | { kind: 'castle' }
+  | { kind: 'arcade' };
+
+export type FrontierRuntimeWait =
+  | { kind: 'next-frame' }
+  | { kind: 'time'; variable: number }
+  | { kind: 'message' }
+  | { kind: 'ab' }
+  | { kind: 'ab-time' }
+  | { kind: 'menu'; menuKind: MenuKind }
+  | { kind: 'yes-no'; variable: number }
+  | { kind: 'movement' }
+  | { kind: 'sprite'; slot: number }
+  | { kind: 'fade' }
+  | { kind: 'audio-se'; sequence: Id }
+  | { kind: 'fanfare' }
+  | { kind: 'shake' }
+  | { kind: 'window' }
+  | { kind: 'particles' }
+  | { kind: 'battle-return' }
+  | {
+      kind: 'app';
+      continuation: FrontierAppContinuation;
+    }
+  | {
+      kind: 'frontier-wipe';
+      wipeType: number;
+      flashIndex: number;
+      phase: 'flash' | 'wipe' | 'end';
+    }
+  | { kind: 'brain-cut-in' };
+
+export type FrontierHandler = (
+  f: FrontierRunner,
+  c: FrontierContext,
+  args: Arg[],
+) => FrontierResult;
 
 /** Decomp FrontierScriptContext. */
 export interface FrontierContext {
@@ -42,6 +112,7 @@ export interface FrontierContext {
   stack: { label: Id; cmds: Command[]; pc: number }[];
   state: 'running' | 'waiting' | 'stopped';
   wait: FrontierWait | null;
+  waitState: FrontierRuntimeWait | null;
   cmp: number;
   /** Decomp unk_08[8]: vars 0x8000–0x8007. */
   locals: number[];
@@ -49,6 +120,102 @@ export interface FrontierContext {
   data: number[];
   /** The text bank its messages and local menus read (decomp ctx->msgLoader: its scene's FR_SCENE_BANK_ID). */
   textBank: Id;
+}
+
+export interface FrontierContextRuntimeSnapshot {
+  label: Id;
+  pc: number;
+  stack: {
+    label: Id;
+    pc: number;
+  }[];
+  state: FrontierContext['state'];
+  waitState: FrontierRuntimeWait | null;
+  cmp: number;
+  locals: number[];
+  data: number[];
+  textBank: Id;
+}
+
+export interface FrontierRunnerRuntimeSnapshot {
+  kind: 'frontier-runner';
+  scene: FrontierSceneRuntimeSnapshot;
+  entry: Id;
+  textBank: Id;
+  contexts: (
+    | FrontierContextRuntimeSnapshot
+    | null
+  )[];
+  managerVars: number[];
+  slots: (string | null)[];
+  exited: boolean;
+  abWaits: number;
+  change: {
+    scene: number;
+    entry: Id | null;
+    frames: number;
+  } | null;
+  splRandom: number;
+  factory:
+    | BattleFactoryRuntimeSnapshot
+    | null;
+  hall: BattleHallRuntimeSnapshot | null;
+  castle:
+    | BattleCastleRuntimeSnapshot
+    | null;
+  arcade:
+    | BattleArcadeRuntimeSnapshot
+    | null;
+}
+
+const frontierRecord = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value);
+
+export function validateFrontierRunnerRuntimeSnapshot(
+  value: unknown,
+): value is FrontierRunnerRuntimeSnapshot {
+  if (
+    !frontierRecord(value) ||
+    value.kind !== 'frontier-runner' ||
+    !validateFrontierSceneRuntimeSnapshot(
+      value.scene,
+    ) ||
+    typeof value.entry !== 'string' ||
+    typeof value.textBank !== 'string' ||
+    !Array.isArray(value.contexts) ||
+    value.contexts.length !== CONTEXTS ||
+    !value.contexts.every(
+      (context) =>
+        context === null ||
+        frontierRecord(context),
+    ) ||
+    !Array.isArray(value.managerVars) ||
+    value.managerVars.length !==
+      MANAGER_VARS ||
+    !value.managerVars.every(
+      Number.isSafeInteger,
+    ) ||
+    !Array.isArray(value.slots) ||
+    !value.slots.every(
+      (slot) =>
+        slot === null ||
+        typeof slot === 'string',
+    ) ||
+    typeof value.exited !== 'boolean' ||
+    !Number.isSafeInteger(value.abWaits) ||
+    (value.abWaits as number) < 0 ||
+    !Number.isSafeInteger(value.splRandom) ||
+    (value.splRandom as number) < 0 ||
+    (value.splRandom as number) > 0xffffffff
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 const CONTEXTS = 8;
@@ -89,7 +256,7 @@ export class FrontierRunner {
   constructor(
     readonly r: Runner,
     sceneId: number,
-    entry: Id,
+    readonly entry: Id,
     readonly tower: () => BattleTower | null,
   ) {
     const tables = newGameRecord(r.registries).frontier;
@@ -99,6 +266,193 @@ export class FrontierRunner {
     // The field faded out before the scene (decomp: the frontier app starts on a black screen).
     this.loadScene(sceneId, { color: 'black', alpha: 1 });
     this.load(entry);
+  }
+
+  captureRuntimeSnapshot(): FrontierRunnerRuntimeSnapshot {
+    const contexts = this.contexts.map(
+      (context) => {
+        if (!context) return null;
+
+        if (
+          context.state === 'waiting' &&
+          !context.waitState
+        ) {
+          throw new Error(
+            `Frontier context ${context.label} has a closure-backed wait.`,
+          );
+        }
+
+        return {
+          label: context.label,
+          pc: context.pc,
+          stack: context.stack.map(
+            (frame) => ({
+              label: frame.label,
+              pc: frame.pc,
+            }),
+          ),
+          state: context.state,
+          waitState: context.waitState
+            ? structuredClone(
+                context.waitState,
+              )
+            : null,
+          cmp: context.cmp,
+          locals: [...context.locals],
+          data: [...context.data],
+          textBank: context.textBank,
+        };
+      },
+    );
+
+    return {
+      kind: 'frontier-runner',
+      scene:
+        this.scene.captureRuntimeSnapshot(),
+      entry: this.entry,
+      textBank: this.textBank,
+      contexts,
+      managerVars: [...this.managerVars],
+      slots: this.slots.map(
+        (slot) => slot ?? null,
+      ),
+      exited: this.exited,
+      abWaits: this.abWaits,
+      change: this.change
+        ? { ...this.change }
+        : null,
+      splRandom: this.splRandom.state,
+      factory:
+        this.factory?.captureRuntimeSnapshot() ??
+        null,
+      hall:
+        this.hall?.captureRuntimeSnapshot() ??
+        null,
+      castle:
+        this.castle?.captureRuntimeSnapshot() ??
+        null,
+      arcade:
+        this.arcade?.captureRuntimeSnapshot() ??
+        null,
+    };
+  }
+
+  restoreRuntimeSnapshot(
+    value: unknown,
+  ): void {
+    if (
+      !validateFrontierRunnerRuntimeSnapshot(
+        value,
+      )
+    ) {
+      throw new Error(
+        'Invalid Frontier runner runtime snapshot.',
+      );
+    }
+
+    if (value.scene.id !== this.scene.id) {
+      throw new Error(
+        `Frontier runner snapshot is for scene ${value.scene.id}, not ${this.scene.id}.`,
+      );
+    }
+
+    const rand = () => this.r.rng() >>> 16;
+
+    this.textBank = value.textBank;
+    this.managerVars.splice(
+      0,
+      this.managerVars.length,
+      ...value.managerVars,
+    );
+    this.slots.splice(
+      0,
+      this.slots.length,
+      ...value.slots.map(
+        (slot) => slot ?? undefined,
+      ),
+    );
+    this.exited = value.exited;
+    this.abWaits = value.abWaits;
+    this.change = value.change
+      ? { ...value.change }
+      : null;
+    this.splRandom.state = value.splRandom;
+
+    value.contexts.forEach(
+      (snapshot, index) => {
+        if (!snapshot) {
+          this.contexts[index] = null;
+          return;
+        }
+
+        this.contexts[index] = {
+          label: snapshot.label,
+          cmds: this.commands(snapshot.label),
+          pc: snapshot.pc,
+          stack: snapshot.stack.map(
+            (frame) => ({
+              label: frame.label,
+              cmds: this.commands(
+                frame.label,
+              ),
+              pc: frame.pc,
+            }),
+          ),
+          state: snapshot.state,
+          wait: null,
+          waitState: snapshot.waitState
+            ? structuredClone(
+                snapshot.waitState,
+              )
+            : null,
+          cmp: snapshot.cmp,
+          locals: [...snapshot.locals],
+          data: [...snapshot.data],
+          textBank: snapshot.textBank,
+        };
+      },
+    );
+
+    this.factory = value.factory
+      ? BattleFactory.restoreRuntimeSnapshot(
+          this.r.state,
+          this.r.registries,
+          rand,
+          value.factory,
+        )
+      : null;
+
+    this.hall = value.hall
+      ? BattleHall.restoreRuntimeSnapshot(
+          this.r.state,
+          this.r.registries,
+          rand,
+          value.hall,
+        )
+      : null;
+
+    this.castle = value.castle
+      ? BattleCastle.restoreRuntimeSnapshot(
+          this.r.state,
+          this.r.registries,
+          rand,
+          value.castle,
+        )
+      : null;
+
+    this.arcade = value.arcade
+      ? BattleArcade.restoreRuntimeSnapshot(
+          this.r.state,
+          this.r.registries,
+          rand,
+          value.arcade,
+        )
+      : null;
+
+    this.scene.restoreRuntimeSnapshot(
+      value.scene,
+    );
+    this.splRandom.state = value.splRandom;
   }
 
   /** Decomp FrontierGraphics_New: the scene's room and music (the scene BGM plays again after a battle too). */
@@ -154,17 +508,32 @@ export class FrontierRunner {
   }
 
   /** Decomp BattleFrontier_RunSubApp with an application (the Factory's and the Hall's apps): the script waits for it. */
-  openApp(c: FrontierContext, request: AppRequest, done: (result: AppResult) => void): FrontierResult {
-    if (this.r.app) throw new Error(`frontier: open ${request.app} while ${this.r.app.request.app} is open`);
-    this.r.app = { request, result: null };
-    return this.pause(c, () => {
-      const result = this.r.app?.result;
-      if (!result) return false;
-      this.r.app = null;
-      done(result);
-      this.afterSubApp();
-      return true;
-    });
+  openApp(
+    c: FrontierContext,
+    request: AppRequest,
+    continuation: FrontierAppContinuation,
+  ): FrontierResult {
+    if (this.r.app) {
+      throw new Error(
+        `frontier: open ${request.app} while ${this.r.app.request.app} is open`,
+      );
+    }
+
+    this.r.app = {
+      request,
+      result: null,
+      continuation: { kind: 'none' },
+      done: null,
+    };
+
+    return this.pause(
+      c,
+      () => false,
+      {
+        kind: 'app',
+        continuation,
+      },
+    );
   }
 
   /** Decomp BattleFrontier_RunSubApp's return: the scene's music again (the room and its characters are kept). */
@@ -189,7 +558,19 @@ export class FrontierRunner {
   load(label: Id): void {
     const i = this.contexts.findIndex((c) => !c);
     if (i < 0) throw new Error(`frontier: no free script context for ${label}`);
-    this.contexts[i] = { label, cmds: this.commands(label), pc: 0, stack: [], state: 'running', wait: null, cmp: 0, locals: Array(8).fill(0), data: Array(4).fill(0), textBank: this.textBank };
+    this.contexts[i] = {
+      label,
+      cmds: this.commands(label),
+      pc: 0,
+      stack: [],
+      state: 'running',
+      wait: null,
+      waitState: null,
+      cmp: 0,
+      locals: Array(8).fill(0),
+      data: Array(4).fill(0),
+      textBank: this.textBank,
+    };
   }
 
   commands(label: Id): Command[] {
@@ -238,10 +619,20 @@ export class FrontierRunner {
   private run(c: FrontierContext, input: InputFrame): boolean {
     if (c.state === 'stopped') return false;
     if (c.state === 'waiting') {
-      if (c.wait!(input)) {
+      const done = c.waitState
+        ? this.resumeRuntimeWait(
+            c,
+            c.waitState,
+            input,
+          )
+        : c.wait!(input);
+
+      if (done) {
         c.state = 'running';
         c.wait = null;
+        c.waitState = null;
       }
+
       return true;
     }
     for (let n = 0; n < MAX_COMMANDS; n++) {
@@ -267,10 +658,432 @@ export class FrontierRunner {
     throw new Error(`frontier script ${c.label}: more than ${MAX_COMMANDS} commands without yielding`);
   }
 
-  pause(c: FrontierContext, wait: FrontierWait): FrontierResult {
+  pause(
+    c: FrontierContext,
+    wait: FrontierWait,
+    waitState: FrontierRuntimeWait | null = null,
+  ): FrontierResult {
     c.state = 'waiting';
     c.wait = wait;
+    c.waitState = waitState;
     return 'yield';
+  }
+
+  private resumeRuntimeWait(
+    c: FrontierContext,
+    wait: FrontierRuntimeWait,
+    input: InputFrame,
+  ): boolean {
+    switch (wait.kind) {
+      case 'next-frame':
+        return true;
+
+      case 'time': {
+        const left =
+          (this.getVar(c, wait.variable) - 1) &
+          0xffff;
+
+        this.setVar(c, wait.variable, left);
+        return left === 0;
+      }
+
+      case 'message':
+        return (
+          this.r.ui.message?.printer.done ??
+          true
+        );
+
+      case 'ab': {
+        const done =
+          input.pressed.includes('a') ||
+          input.pressed.includes('b');
+
+        if (done) this.abWaits--;
+        return done;
+      }
+
+      case 'ab-time':
+        if (
+          input.pressed.includes('a') ||
+          input.pressed.includes('b')
+        ) {
+          return true;
+        }
+
+        c.data[0] =
+          (c.data[0]! - 1) & 0xffff;
+
+        return c.data[0] === 0;
+
+      case 'menu': {
+        const menu = this.r.ui.menu;
+
+        if (!menu) {
+          throw new Error(
+            'Frontier menu wait has no menu',
+          );
+        }
+
+        const touch =
+          input.touch?.screen === 'main' &&
+          !this.r.lastTouch
+            ? input.touch
+            : null;
+
+        const before = menu.current;
+        const result = menu.step(input, touch);
+        const moved = menu.current !== before;
+
+        if (moved || result !== null) {
+          this.r.playFieldSe(1500);
+        }
+
+        if (result === null) {
+          if (
+            wait.menuKind === 'list' &&
+            moved
+          ) {
+            const alt = menu.current.altText;
+
+            if (
+              alt !== undefined &&
+              alt !== NO_ALT_TEXT
+            ) {
+              this.r.ui.message = {
+                printer: new TextPrinter(
+                  toPrintOps(
+                    this.r.textOf(
+                      this.r.bankText(
+                        menu.bank,
+                        alt,
+                      ),
+                    ),
+                    this.slots,
+                  ),
+                  {
+                    speed:
+                      TEXT_SPEED.instant,
+                  },
+                ),
+              };
+            }
+          }
+
+          return false;
+        }
+
+        this.setVar(
+          c,
+          c.data[0]!,
+          result === MENU_RESULT.cancel
+            ? 0xfffe
+            : result,
+        );
+
+        this.r.ui.menu = null;
+        return true;
+      }
+
+      case 'yes-no': {
+        const box = this.r.ui.yesNo;
+
+        if (!box) {
+          throw new Error(
+            'Frontier yes/no wait has no box',
+          );
+        }
+
+        const before = box.cursor;
+        let result: number | null = null;
+
+        if (input.pressed.includes('a')) {
+          result = box.cursor === 0 ? 0 : 1;
+        } else if (input.pressed.includes('b')) {
+          result = 1;
+        } else if (input.pressed.includes('up')) {
+          box.cursor = 0;
+        } else if (
+          input.pressed.includes('down')
+        ) {
+          box.cursor = 1;
+        }
+
+        if (
+          result !== null ||
+          box.cursor !== before
+        ) {
+          this.r.playFieldSe(1500);
+        }
+
+        if (result === null) return false;
+
+        this.setVar(c, wait.variable, result);
+        this.r.ui.yesNo = null;
+        return true;
+      }
+
+      case 'movement':
+        return this.scene.movements === 0;
+
+      case 'sprite':
+        return this.scene.spriteDone(wait.slot);
+
+      case 'fade':
+        return this.scene.fadeDone();
+
+      case 'audio-se':
+        return !this.r.audio.sePlaying(
+          wait.sequence,
+        );
+
+      case 'fanfare':
+        return !this.r.audio.waitFanfare();
+
+      case 'shake':
+        return this.scene.shakeDone();
+
+      case 'window':
+        return this.scene.windowDone();
+
+      case 'particles':
+        return this.scene.particles.idle();
+
+      case 'battle-return':
+        if (!this.r.field.battleDone()) {
+          return false;
+        }
+
+        this.afterSubApp();
+        return true;
+
+      case 'app': {
+        const result = this.r.app?.result;
+
+        if (!result) return false;
+
+        this.r.app = null;
+
+        switch (wait.continuation.kind) {
+          case 'hall-board':
+            if (
+              result.app !== 'hall-board'
+            ) {
+              throw new Error(
+                `Frontier Hall expected hall-board, got ${result.app}`,
+              );
+            }
+
+            if (!this.hall) {
+              throw new Error(
+                'Frontier Hall app has no challenge',
+              );
+            }
+
+            this.hall.setCell(result.cell);
+            break;
+
+          case 'factory-rent':
+            if (
+              result.app !== 'factory' ||
+              !('picks' in result)
+            ) {
+              throw new Error(
+                'Frontier Factory expected a rental result',
+              );
+            }
+
+            if (!this.factory) {
+              throw new Error(
+                'Frontier Factory app has no challenge',
+              );
+            }
+
+            this.factory.setAppResult(
+              result.picks,
+            );
+            break;
+
+          case 'factory-swap':
+            if (
+              result.app !== 'factory' ||
+              !('swap' in result)
+            ) {
+              throw new Error(
+                'Frontier Factory expected a trade result',
+              );
+            }
+
+            if (!this.factory) {
+              throw new Error(
+                'Frontier Factory app has no challenge',
+              );
+            }
+
+            this.factory.setAppResult(
+              result.swap
+                ? [...result.swap]
+                : [0xff, 0],
+            );
+            break;
+
+          case 'castle':
+            if (result.app !== 'castle') {
+              throw new Error(
+                `Frontier Castle expected castle, got ${result.app}`,
+              );
+            }
+
+            if (!this.castle) {
+              throw new Error(
+                'Frontier Castle app has no challenge',
+              );
+            }
+
+            this.castle.setAppResult(result);
+            break;
+
+          case 'arcade':
+            if (result.app !== 'arcade') {
+              throw new Error(
+                `Frontier Arcade expected arcade, got ${result.app}`,
+              );
+            }
+
+            if (!this.arcade) {
+              throw new Error(
+                'Frontier Arcade app has no challenge',
+              );
+            }
+
+            this.arcade.setAppResult(
+              result.effect,
+              result.cursor,
+              result.random,
+            );
+            break;
+        }
+
+        this.afterSubApp();
+        return true;
+      }
+
+      case 'frontier-wipe': {
+        const scene = this.scene;
+
+        if (wait.phase === 'flash') {
+          if (!scene.fadeDone()) return false;
+
+          const flashes:
+            [boolean, number][] = [
+              [true, 3],
+              [false, 3],
+              [true, 3],
+              [false, 3],
+            ];
+
+          if (
+            wait.flashIndex <
+            flashes.length
+          ) {
+            const [out, ticks] =
+              flashes[wait.flashIndex]!;
+
+            wait.flashIndex++;
+            scene.startFade(
+              out,
+              ticks,
+              'white',
+            );
+            return false;
+          }
+
+          wait.phase = 'wipe';
+
+          if (wait.wipeType === 0) {
+            scene.startFade(
+              true,
+              12,
+              'black',
+            );
+          } else if (
+            wait.wipeType === 1 ||
+            wait.wipeType === 2
+          ) {
+            scene.wipe = new BlockWipe(
+              wait.wipeType === 1
+                ? 'rows'
+                : 'columns',
+            );
+
+            return false;
+          } else {
+            scene.wipe = new LineWipe(
+              wait.wipeType === 3 ? 1 : 2,
+              scene.lineLayers(),
+            );
+
+            scene.startFade(
+              true,
+              40,
+              'black',
+            );
+          }
+        }
+
+        const wipe = scene.wipe;
+
+        if (wait.phase === 'wipe') {
+          if (wait.wipeType === 0) {
+            return scene.fadeDone();
+          }
+
+          if (wipe instanceof BlockWipe) {
+            if (wipe.step()) {
+              wait.phase = 'end';
+            }
+
+            return false;
+          }
+
+          if (wipe instanceof LineWipe) {
+            wipe.step();
+
+            if (!scene.fadeDone()) {
+              return false;
+            }
+
+            wipe.bgHidden = true;
+            wait.phase = 'end';
+            return false;
+          }
+
+          throw new Error(
+            'Frontier wipe is missing',
+          );
+        }
+
+        scene.blackOut();
+        scene.wipe = null;
+        return true;
+      }
+
+      case 'brain-cut-in': {
+        const cutIn = this.scene.brainCutIn;
+
+        if (!cutIn) {
+          throw new Error(
+            'Frontier Brain wait has no cut-in',
+          );
+        }
+
+        if (!cutIn.effect.finished) {
+          return false;
+        }
+
+        this.scene.brainCutIn = null;
+        return true;
+      }
+    }
   }
 
   stop(c: FrontierContext): void {

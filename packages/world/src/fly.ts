@@ -100,12 +100,40 @@ const setAnim = (p: PlayerSprite, anim: number) => {
 };
 
 /** PushPlayer (sPushPlayerFuncs): the player sprite lifted by the significant (fly away) or slight (landing) deltas. */
+interface PushPlayerRuntimeSnapshot {
+  mode: 0 | 1 | 2;
+  base: number;
+  idx: number;
+  finished: boolean;
+}
+
 class PushPlayer {
   private mode: 0 | 1 | 2 = 0;
   private base = 0;
   private idx = 0;
   private finished = false;
   constructor(private readonly player: PlayerSprite) {}
+
+  capture(): PushPlayerRuntimeSnapshot {
+    return {
+      mode: this.mode,
+      base: this.base,
+      idx: this.idx,
+      finished: this.finished,
+    };
+  }
+
+  static restore(
+    player: PlayerSprite,
+    snapshot: PushPlayerRuntimeSnapshot,
+  ): PushPlayer {
+    const push = new PushPlayer(player);
+    push.mode = snapshot.mode;
+    push.base = snapshot.base;
+    push.idx = snapshot.idx;
+    push.finished = snapshot.finished;
+    return push;
+  }
   /** FlyPickUpPlayer_SetUpPlayerAnimEnv (1) and FlyLanding_SetUpPlayerAnimEnv (2). */
   start(mode: 1 | 2): void {
     [this.mode, this.idx, this.finished, this.base] = [mode, 0, false, this.player.y];
@@ -160,6 +188,50 @@ interface Bird {
  * The HM cut-in (HMCutIn_StartTask): Fly's (isFly, sCutInTaskFuncsFly), or with `fly` false every other field move's
  * (sCutInTaskFuncs), which shares the first ten states and then closes the window (HMCutIn_WindowShrinkY).
  */
+type FlyCutInPending =
+  | 'ready'
+  | 'wind'
+  | 'show-hide'
+  | 'bird-active'
+  | 'push'
+  | 'zoom';
+
+export interface FlyCutInRuntimeSnapshot {
+  state: number;
+  subState: number;
+  ready: boolean;
+  window: {
+    on: boolean;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    delta: number;
+  };
+  pattern: boolean;
+  wind: {
+    x: number;
+    y: number;
+    dx: number;
+    anim: number;
+    visible: boolean;
+  }[];
+  windState: 1 | 2;
+  mon: { x: number; delta: number } | null;
+  player: PlayerSprite;
+  showHide: boolean;
+  forceDraw: boolean;
+  bird: Bird | null;
+  push: PushPlayerRuntimeSnapshot | null;
+  zoom: RuntimeCameraZoomSnapshot;
+  zoomActive: boolean;
+  faded: boolean;
+  pending: FlyCutInPending[];
+  finished: boolean;
+  birdActive: boolean;
+  fly: boolean;
+}
+
 export class FlyCutIn {
   private state = 0;
   private subState = 0;
@@ -178,7 +250,7 @@ export class FlyCutIn {
   private zoomActive = false;
   private faded = false;
   /** Tasks started this tick, which run from the next. */
-  private pending: (() => void)[] = [];
+  private pending: FlyCutInPending[] = [];
   finished = false;
 
   constructor(
@@ -186,8 +258,96 @@ export class FlyCutIn {
     private readonly fly = true,
   ) {}
 
+  capture(): FlyCutInRuntimeSnapshot {
+    return structuredClone({
+      state: this.state,
+      subState: this.subState,
+      ready: this.ready,
+      window: this.window,
+      pattern: this.pattern,
+      wind: this.wind,
+      windState: this.windState,
+      mon: this.mon,
+      player: this.player,
+      showHide: this.showHide,
+      forceDraw: this.forceDraw,
+      bird: this.bird,
+      push: this.push?.capture() ?? null,
+      zoom: this.zoom.capture(),
+      zoomActive: this.zoomActive,
+      faded: this.faded,
+      pending: this.pending,
+      finished: this.finished,
+      birdActive: this.birdActive,
+      fly: this.fly,
+    });
+  }
+
+  static restore(
+    h: FlyHost,
+    snapshot: FlyCutInRuntimeSnapshot,
+  ): FlyCutIn {
+    const cutIn = new FlyCutIn(h, snapshot.fly);
+    cutIn.state = snapshot.state;
+    cutIn.subState = snapshot.subState;
+    cutIn.ready = snapshot.ready;
+    cutIn.window = structuredClone(snapshot.window);
+    cutIn.pattern = snapshot.pattern;
+    cutIn.wind = structuredClone(snapshot.wind);
+    cutIn.windState = snapshot.windState;
+    cutIn.mon = structuredClone(snapshot.mon);
+    Object.assign(
+      cutIn.player,
+      structuredClone(snapshot.player),
+    );
+    cutIn.showHide = snapshot.showHide;
+    cutIn.forceDraw = snapshot.forceDraw;
+    cutIn.bird = structuredClone(snapshot.bird);
+    cutIn.push = snapshot.push
+      ? PushPlayer.restore(cutIn.player, snapshot.push)
+      : null;
+    cutIn.zoom.restore(snapshot.zoom);
+    cutIn.zoomActive = snapshot.zoomActive;
+    cutIn.faded = snapshot.faded;
+    cutIn.pending = [...snapshot.pending];
+    cutIn.finished = snapshot.finished;
+    cutIn.birdActive = snapshot.birdActive;
+    return cutIn;
+  }
+
   tick(): void {
-    for (const start of this.pending.splice(0)) start();
+    for (const action of this.pending.splice(0)) {
+      switch (action) {
+        case 'ready':
+          this.ready = true;
+          break;
+        case 'wind':
+          for (const [x, y, dx, anim] of WIND) {
+            for (const ox of [0, 256]) {
+              this.wind.push({
+                x: fx(x + ox),
+                y: fx(y),
+                dx: fx(dx),
+                anim,
+                visible: false,
+              });
+            }
+          }
+          break;
+        case 'show-hide':
+          this.showHide = true;
+          break;
+        case 'bird-active':
+          this.birdActive = true;
+          break;
+        case 'push':
+          this.push = new PushPlayer(this.player);
+          break;
+        case 'zoom':
+          this.zoomActive = true;
+          break;
+      }
+    }
     this.push?.tick();
     this.birdTick();
     this.windTick();
@@ -216,21 +376,19 @@ export class FlyCutIn {
         w.on = true;
         this.pattern = true;
         this.state++;
-        this.pending.push(() => (this.ready = true));
+        this.pending.push('ready');
         return false;
       case 1: // CutIn_InitSpritesFly
         if (!this.ready) return false;
         Object.assign(this.player, { x: fx(128), y: fx(96), visible: false });
         setAnim(this.player, 6);
         this.mon = { x: fx(256 + 40), delta: 0 };
-        this.pending.push(() => {
-          for (const [x, y, dx, anim] of WIND) for (const ox of [0, 256]) this.wind.push({ x: fx(x + ox), y: fx(y), dx: fx(dx), anim, visible: false });
-        });
+        this.pending.push('wind');
         this.windState = 2;
         this.state++;
         return true;
       case 2: // HMCutIn_InitWindowAndPlayerSprite
-        this.pending.push(() => (this.showHide = true));
+        this.pending.push('show-hide');
         Object.assign(w, { delta: fx(-64), x1: fx(254), x2: fx(255), y1: fx(95), y2: fx(97) });
         this.state++;
         return false;
@@ -285,7 +443,7 @@ export class FlyCutIn {
         return false;
       case 11: // HMCutIn_LoadBirdSprite
         this.ready = false;
-        this.pending.push(() => (this.ready = true));
+        this.pending.push('ready');
         this.state++;
         return false;
       case 12: // HMCutIn_WaitResourceTransfer
@@ -298,7 +456,7 @@ export class FlyCutIn {
           sprite: { x: fx(136), y: fx(88), scale: 0x400, rotation: 60, visible: true },
         };
         this.birdActive = false;
-        this.pending.push(() => (this.birdActive = true));
+        this.pending.push('bird-active');
         this.h.hidePlayer(true);
         this.state++;
         return false;
@@ -399,11 +557,10 @@ export class FlyCutIn {
     const b = this.bird!;
     Object.assign(b, { stage: 2, state: 0, subState: 1, descendCount: 0, start: [fx(128), fx(104)], rotation: fx(315), scale: fx(1.25), scaleDelta: fx(0.0625), angle: fx(225), path: fx(192), delta: fx(32) });
     b.sprite = { x: b.start[0] + cos(315) * deg(b.path), y: b.start[1] + sin(deg(b.angle)) * deg(b.path), scale: b.scale, rotation: 315, visible: true };
-    const push = new PushPlayer(this.player);
-    this.pending.push(() => (this.push = push));
+    this.pending.push('push');
     this.forceDraw = true;
     this.zoom.set(1, fx(-120), 12);
-    this.pending.push(() => (this.zoomActive = true));
+    this.pending.push('zoom');
     this.player.scale = FX;
   }
 
@@ -492,6 +649,25 @@ const spriteView = (s: Sprite) => ({ x: s.x / FX, y: s.y / FX, scale: s.scale / 
 const playerView = (p: PlayerSprite) => ({ ...spriteView(p), anim: p.anim, tick: p.animating ? p.animTick : 0 });
 
 /** The landing (FieldTask_FlyLanding_InitTask, sFlyLandingFuncs and the landing anim manager). */
+type FlyLandingPending =
+  | 'env-active'
+  | 'push'
+  | 'zoom';
+
+export interface FlyLandingRuntimeSnapshot {
+  state: number;
+  player: PlayerSprite;
+  env: Bird | null;
+  envActive: boolean;
+  push: PushPlayerRuntimeSnapshot | null;
+  zoom: RuntimeCameraZoomSnapshot;
+  zoomActive: boolean;
+  ended: boolean;
+  pending: FlyLandingPending[];
+  finished: boolean;
+  fly: boolean;
+}
+
 export class FlyLanding {
   private state = 0;
   private readonly player = newPlayer();
@@ -501,7 +677,7 @@ export class FlyLanding {
   readonly zoom = new CameraZoom();
   private zoomActive = false;
   private ended = false;
-  private pending: (() => void)[] = [];
+  private pending: FlyLandingPending[] = [];
   finished = false;
 
   constructor(
@@ -509,8 +685,59 @@ export class FlyLanding {
     private readonly fly = true,
   ) {}
 
+  capture(): FlyLandingRuntimeSnapshot {
+    return structuredClone({
+      state: this.state,
+      player: this.player,
+      env: this.env,
+      envActive: this.envActive,
+      push: this.push?.capture() ?? null,
+      zoom: this.zoom.capture(),
+      zoomActive: this.zoomActive,
+      ended: this.ended,
+      pending: this.pending,
+      finished: this.finished,
+      fly: this.fly,
+    });
+  }
+
+  static restore(
+    h: FlyHost,
+    snapshot: FlyLandingRuntimeSnapshot,
+  ): FlyLanding {
+    const landing = new FlyLanding(h, snapshot.fly);
+    landing.state = snapshot.state;
+    Object.assign(
+      landing.player,
+      structuredClone(snapshot.player),
+    );
+    landing.env = structuredClone(snapshot.env);
+    landing.envActive = snapshot.envActive;
+    landing.push = snapshot.push
+      ? PushPlayer.restore(landing.player, snapshot.push)
+      : null;
+    landing.zoom.restore(snapshot.zoom);
+    landing.zoomActive = snapshot.zoomActive;
+    landing.ended = snapshot.ended;
+    landing.pending = [...snapshot.pending];
+    landing.finished = snapshot.finished;
+    return landing;
+  }
+
   tick(): void {
-    for (const start of this.pending.splice(0)) start();
+    for (const action of this.pending.splice(0)) {
+      switch (action) {
+        case 'env-active':
+          this.envActive = true;
+          break;
+        case 'push':
+          this.push = new PushPlayer(this.player);
+          break;
+        case 'zoom':
+          this.zoomActive = true;
+          break;
+      }
+    }
     this.push?.tick();
     if (this.env && this.envActive) this.envTick(this.env);
     this.landing();
@@ -537,11 +764,10 @@ export class FlyLanding {
         env.sprite.x = env.start[0] + cos(45) * deg(path);
         env.sprite.y = env.start[1] + sin(deg(env.angle)) * deg(path);
         this.env = env;
-        this.pending.push(() => (this.envActive = true));
-        const push = new PushPlayer(this.player);
-        this.pending.push(() => (this.push = push));
+        this.pending.push('env-active');
+        this.pending.push('push');
         this.zoom.set(1, fx(-120), 12);
-        this.pending.push(() => (this.zoomActive = true));
+        this.pending.push('zoom');
         this.player.scale = 0x2000;
         setAnim(this.player, 2);
         this.h.fadeIn();
@@ -671,14 +897,53 @@ const MAP_CHANGE_AT = 3;
 const LANDING_AT = 6;
 
 /** FieldMoves_FlyTask and FieldTask_MapChangeFly: the cut-in, the map change, the landing. */
+export interface FlyTaskRuntimeSnapshot {
+  cutIn: FlyCutInRuntimeSnapshot;
+  landing: FlyLandingRuntimeSnapshot | null;
+  gap: number;
+  done: boolean;
+}
+
 export class FlyTask {
-  private readonly cutIn: FlyCutIn;
+  private cutIn: FlyCutIn;
   private landing: FlyLanding | null = null;
   private gap = 0;
   done = false;
 
   constructor(private readonly h: FlyTaskHost) {
     this.cutIn = new FlyCutIn(h);
+  }
+
+  capture(): FlyTaskRuntimeSnapshot {
+    return {
+      cutIn: this.cutIn.capture(),
+      landing: this.landing?.capture() ?? null,
+      gap: this.gap,
+      done: this.done,
+    };
+  }
+
+  static restore(
+    h: FlyTaskHost,
+    snapshot: FlyTaskRuntimeSnapshot,
+  ): FlyTask {
+    const task = new FlyTask(h);
+    task.cutIn = FlyCutIn.restore(h, snapshot.cutIn);
+    task.landing = snapshot.landing
+      ? FlyLanding.restore(h, snapshot.landing)
+      : null;
+    task.gap = snapshot.gap;
+    task.done = snapshot.done;
+    return task;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: FlyTaskRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      FlyTask.restore(this.h, snapshot),
+    );
   }
 
   tick(): void {

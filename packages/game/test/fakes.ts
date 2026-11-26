@@ -63,6 +63,9 @@ export const createFakeWorld: CreateWorld = ({ registries, state, scripts }) => 
   };
 
   const world: World = {
+    captureRuntimeSnapshot: () => null,
+    validateRuntimeSnapshot: () => null,
+    restoreRuntimeSnapshot: () => {},
     hmCutIn() {},
     hmCutInDone: () => true,
     player: () => ({ ...state.player }),

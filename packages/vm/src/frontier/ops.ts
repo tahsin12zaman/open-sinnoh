@@ -5,7 +5,7 @@
  */
 import type { Arg, Id } from '@opensinnoh/core';
 import { heal } from '@opensinnoh/core';
-import { dexOf, tvBattlePoints, type InputFrame } from '@opensinnoh/contracts';
+import { dexOf, tvBattlePoints } from '@opensinnoh/contracts';
 import { addToGameRecord, giveBattlePoints, incrementTrainerScore, removeBattlePoints, battlePoints } from '@opensinnoh/services';
 import { plainMarkup, TEXT_SPEED, TextPrinter, toPrintOps } from '@opensinnoh/text';
 import { CONDITIONS } from '../commands.ts';
@@ -25,16 +25,12 @@ const CONDITION_TABLE: Record<string, [boolean, boolean, boolean]> = {
   ne: [true, false, true],
 };
 /** Decomp MENU_YES, MENU_NO. */
-const MENU_YES = 0;
 const MENU_NO = 1;
 /** Decomp FADE_TYPE_* brightness out are even (field fade_screen's rule). */
 const fadeOut = (type: number) => type % 2 === 0;
 /** Decomp SE_CONFIRM (the menus' and yes/no's sound). */
-const SE_CONFIRM = 1500;
 /** Decomp OBJ_EVENT_GFX_PLAYER_M / _F (generated/object_events_gfx.txt). */
 const PLAYER_GFX = { male: 0, female: 0x61 } as const;
-
-const has = (input: InputFrame, b: InputFrame['pressed'][number]) => input.pressed.includes(b);
 
 export function frontierHandlers(): Record<string, FrontierHandler> {
   const val = (f: FrontierRunner, c: FrontierContext, a: Arg | undefined) => f.val(c, a);
@@ -54,7 +50,13 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     if (!rec) throw new Error(`unknown text ${text}`);
     const printer = new TextPrinter(toPrintOps(rec.text, f.slots), { speed, canSpeedUp: true });
     f.r.ui.message = { printer };
-    return wait ? f.pause(c, () => printer.done) : 'continue';
+    return wait
+      ? f.pause(
+          c,
+          () => false,
+          { kind: 'message' },
+        )
+      : 'continue';
   };
 
   // ---------------------------------------------------------------- menus (decomp FrontierMenuManager)
@@ -63,8 +65,6 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     if (!m) throw new Error('no frontier menu (init_*_text_menu first)');
     return m;
   };
-  /** The menu's result var (decomp FrontierMenuManager selectedOptionPtr, kept in ctx->data[0]). */
-  const menuVars = new WeakMap<ScriptMenu, { c: FrontierContext; id: number }>();
   const initMenu =
     (local: boolean): FrontierHandler =>
     (f, c, a) => {
@@ -73,7 +73,6 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
       if (bank === undefined) throw new Error(`frontier menu: unknown text bank ${c.textBank}`);
       const m = new ScriptMenu({ x: int(f, a[0]), y: int(f, a[1]) }, int(f, a[2]), int(f, a[3]) === 1, bank);
       f.r.ui.menu = m;
-      menuVars.set(m, { c, id });
       c.data[0] = id;
       f.setVar(c, id, MENU_RESULT.pending);
       return 'yield';
@@ -86,28 +85,46 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     (kind: MenuKind): FrontierHandler =>
     (f, c) => {
       const m = menu(f);
-      const target = menuVars.get(m)!;
-      m.show(kind, (s) => measureText(f.r, s));
+
+      m.show(
+        kind,
+        (value) => measureText(f.r, value),
+      );
+
       const alt = () => {
         const id = m.current.altText;
-        if (kind !== 'list' || id === undefined || id === NO_ALT_TEXT) return;
-        f.r.ui.message = { printer: new TextPrinter(toPrintOps(f.r.textOf(f.r.bankText(m.bank, id)), f.slots), { speed: TEXT_SPEED.instant }) };
-      };
-      alt();
-      return f.pause(c, (input) => {
-        const touch = input.touch?.screen === 'main' && !f.r.lastTouch ? input.touch : null;
-        const before = m.current;
-        const result = m.step(input, touch);
-        if (m.current !== before || result !== null) f.r.playFieldSe(SE_CONFIRM);
-        if (result === null) {
-          if (m.current !== before) alt();
-          return false;
+
+        if (
+          kind !== 'list' ||
+          id === undefined ||
+          id === NO_ALT_TEXT
+        ) {
+          return;
         }
-        // Decomp: the menu writes its pick (a cancel as MENU_CANCEL), then the script resumes.
-        f.setVar(target.c, target.id, result === MENU_RESULT.cancel ? 0xfffe : result);
-        f.r.ui.menu = null;
-        return true;
-      });
+
+        f.r.ui.message = {
+          printer: new TextPrinter(
+            toPrintOps(
+              f.r.textOf(
+                f.r.bankText(m.bank, id),
+              ),
+              f.slots,
+            ),
+            { speed: TEXT_SPEED.instant },
+          ),
+        };
+      };
+
+      alt();
+
+      return f.pause(
+        c,
+        () => false,
+        {
+          kind: 'menu',
+          menuKind: kind,
+        },
+      );
     };
 
   // ---------------------------------------------------------------- the room
@@ -145,7 +162,11 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     // Decomp FrontierScrCmd_ChangeSceneWithinScript: the room changes, this script goes on (it resumes next frame).
     fr_change_scene_within_script: (f, c, a) => {
       f.changeScene(val(f, c, a[0]), null);
-      return f.pause(c, () => true);
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'next-frame' },
+      );
     },
     fr_change_script: (f, c, a) => {
       f.changeScene(val(f, c, a[0]), f.ref(a[2], 'label'));
@@ -156,11 +177,14 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
       const id = int(f, a[1]);
       f.setVar(c, id, int(f, a[0]));
       c.data[0] = id;
-      return f.pause(c, () => {
-        const left = (f.getVar(c, c.data[0]!) - 1) & 0xffff;
-        f.setVar(c, c.data[0]!, left);
-        return left === 0;
-      });
+      return f.pause(
+        c,
+        () => false,
+        {
+          kind: 'time',
+          variable: c.data[0]!,
+        },
+      );
     },
     fr_set_var_from_value: (f, c, a) => (f.set(c, a[0], int(f, a[1])), 'continue'),
     fr_set_var_from_var: (f, c, a) => (f.set(c, a[0], f.getVar(c, int(f, a[1]))), 'continue'),
@@ -201,19 +225,19 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     },
     fr_wait_ab_press: (f, c) => {
       f.abWaits++;
-      return f.pause(c, (input) => {
-        if (!has(input, 'a') && !has(input, 'b')) return false;
-        f.abWaits--;
-        return true;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'ab' },
+      );
     },
     fr_wait_ab_press_time: (f, c, a) => {
       c.data[0] = val(f, c, a[0]);
-      return f.pause(c, (input) => {
-        if (has(input, 'a') || has(input, 'b')) return true;
-        c.data[0] = (c.data[0]! - 1) & 0xffff;
-        return c.data[0] === 0;
-      });
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'ab-time' },
+      );
     },
     fr_buffer_item_name: (f, c, a) => ((f.slots[int(f, a[0])] = f.r.itemRecord(val(f, c, a[1])).name), 'continue'),
     // Decomp StringTemplate_SetNumber with GetNumberDigitCount digits: no padding.
@@ -248,13 +272,12 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     fr_show_menu: showMenu('single'),
     fr_show_list_menu: showMenu('list'),
     // Decomp FrontierMenuManager_FreeListMenu: the list closes with MENU_CANCEL.
-    fr_free_list_menu: (f) => {
-      const m = f.r.ui.menu;
-      if (m) {
-        const target = menuVars.get(m)!;
-        f.setVar(target.c, target.id, 0xfffe);
+    fr_free_list_menu: (f, c) => {
+      if (f.r.ui.menu) {
+        f.setVar(c, c.data[0]!, 0xfffe);
         f.r.ui.menu = null;
       }
+
       return 'yield';
     },
     fr_set_menu_x_origin_side: (f, _c, a) => ((menu(f).anchorRight = int(f, a[0]) === 1), 'yield'),
@@ -262,20 +285,19 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     fr_show_yes_no_menu: (f, c, a) => {
       const id = int(f, a[0]);
       c.data[0] = id;
-      const box = (f.r.ui.yesNo = { cursor: (int(f, a[1]) === MENU_NO ? 1 : 0) as 0 | 1 });
-      return f.pause(c, (input) => {
-        const before = box.cursor;
-        let result: number | null = null;
-        if (has(input, 'a')) result = box.cursor === 0 ? MENU_YES : MENU_NO;
-        else if (has(input, 'b')) result = MENU_NO;
-        else if (has(input, 'up')) box.cursor = 0;
-        else if (has(input, 'down')) box.cursor = 1;
-        if (result !== null || box.cursor !== before) f.r.playFieldSe(SE_CONFIRM);
-        if (result === null) return false;
-        f.setVar(c, id, result);
-        f.r.ui.yesNo = null;
-        return true;
-      });
+      f.r.ui.yesNo = {
+        cursor:
+          int(f, a[1]) === MENU_NO ? 1 : 0,
+      };
+
+      return f.pause(
+        c,
+        () => false,
+        {
+          kind: 'yes-no',
+          variable: id,
+        },
+      );
     },
 
     // ---------------------------------------------------------------- the room's characters
@@ -303,7 +325,12 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
       f.scene.applyMovement(val(f, c, a[0]), mv.steps);
       return 'continue';
     },
-    fr_wait_movement: (f, c) => f.pause(c, () => f.scene.movements === 0),
+    fr_wait_movement: (f, c) =>
+      f.pause(
+        c,
+        () => false,
+        { kind: 'movement' },
+      ),
 
     // ---------------------------------------------------------------- the room's sprites
     fr_cmd_2a: (f, c, a) => {
@@ -329,7 +356,11 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     fr_cmd_33: (f, c, a) => {
       const slot = val(f, c, a[0]);
       c.data[0] = slot;
-      return f.pause(c, () => f.scene.spriteDone(slot));
+      return f.pause(
+        c,
+        () => false,
+        { kind: 'sprite', slot },
+      );
     },
     fr_get_player_obj_event_gfx: (f, c, a) => (f.set(c, a[0], f.r.state.gender === 'male' ? PLAYER_GFX.male : PLAYER_GFX.female), 'continue'),
 
@@ -339,7 +370,12 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
       f.scene.startFade(fadeOut(type!), steps! * frames!, color === 0 ? 'black' : 'white');
       return 'continue';
     },
-    fr_wait_fade_screen: (f, c) => f.pause(c, () => f.scene.fadeDone()),
+    fr_wait_fade_screen: (f, c) =>
+      f.pause(
+        c,
+        () => false,
+        { kind: 'fade' },
+      ),
 
     // ---------------------------------------------------------------- sound (frscrcmd_sound.c)
     fr_play_sound_effect: (f, c, a) => {
@@ -354,14 +390,28 @@ export function frontierHandlers(): Record<string, FrontierHandler> {
     },
     fr_wait_sound_effect: (f, c, a) => {
       const s = seq(f, val(f, c, a[0]));
-      return s ? f.pause(c, () => !f.r.audio.sePlaying(s)) : 'continue';
+      return s
+        ? f.pause(
+            c,
+            () => false,
+            {
+              kind: 'audio-se',
+              sequence: s,
+            },
+          )
+        : 'continue';
     },
     fr_play_fanfare: (f, c, a) => {
       const s = seq(f, val(f, c, a[0]));
       if (s) f.r.audio.playFanfare(s);
       return 'continue';
     },
-    fr_wait_fanfare: (f, c) => f.pause(c, () => !f.r.audio.waitFanfare()),
+    fr_wait_fanfare: (f, c) =>
+      f.pause(
+        c,
+        () => false,
+        { kind: 'fanfare' },
+      ),
     fr_play_bgm: (f, c, a) => (f.r.audio.playBgm(seq(f, val(f, c, a[0]))), 'continue'),
     fr_stop_bgm: (f) => (f.r.audio.stopBgm(), 'continue'),
 

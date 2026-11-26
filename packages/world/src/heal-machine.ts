@@ -88,6 +88,15 @@ export class HealMachine {
     return task;
   }
 
+  restoreRuntimeSnapshot(
+    snapshot: RuntimeHealMachineSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      HealMachine.restore(snapshot, this.sound),
+    );
+  }
+
   /** One tick; true once the task has finished. */
   step(): boolean {
     if (this.frame >= 0) this.frame++;

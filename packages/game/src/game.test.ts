@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { setupPokemon, type CreateApp, type CreateScriptRunner, type CreateWorld, type InputFrame, type ScriptView } from '@opensinnoh/contracts';
+import { setupPokemon, type BattleSetup, type CreateApp, type CreateBattle, type CreateScriptRunner, type CreateWorld, type InputFrame, type ScriptView } from '@opensinnoh/contracts';
 import type { Id, PackData } from '@opensinnoh/core';
 import { applyButtonMode, BUTTON_MODE, computePressed, InputState } from './input.ts';
 import { createGame, reloadGame, type GameOptions } from './game.ts';
@@ -146,6 +146,186 @@ describe('createGame', () => {
     expect(game.takeQuitRequest()).toBe(false);
   });
 
+  it('restores an active battle at its exact deterministic tick', () => {
+    let startBattle!:
+      (setup: BattleSetup) => void;
+
+    const createWorld: CreateWorld = (deps) => {
+      startBattle = deps.battles.start;
+      return createFakeWorld(deps);
+    };
+
+    const createBattle: CreateBattle = () => {
+      let ticks = 0;
+      const pressed: string[][] = [];
+
+      return {
+        step(input) {
+          ticks++;
+          pressed.push([...input.pressed]);
+        },
+        choose() {},
+        view: () =>
+          ({
+            battlers: [],
+            runtimeTest: {
+              ticks,
+              pressed,
+            },
+          }) as never,
+        done: () => null,
+        app: () => null,
+        appDone() {},
+      };
+    };
+
+    const game = createGame(
+      options({
+        createWorld,
+        createBattle,
+      }),
+    );
+
+    startBattle({
+      kind: 'wild',
+      trainers: [],
+      wild: [],
+      background:
+        'fixture:RUNTIME_TEST_BACKGROUND' as Id,
+      terrain:
+        'fixture:RUNTIME_TEST_TERRAIN' as Id,
+      time: 'day',
+    });
+
+    game.step({
+      held: [],
+      pressed: ['a'],
+      touch: null,
+    });
+    game.step({
+      held: ['right'],
+      pressed: ['right'],
+      touch: null,
+    });
+    game.step({
+      held: [],
+      pressed: [],
+      touch: null,
+    });
+
+    const snapshot =
+      game.captureRuntimeSnapshot();
+    const expected =
+      structuredClone(game.battle!.view());
+
+    game.step({
+      held: [],
+      pressed: ['b'],
+      touch: null,
+    });
+
+    expect(game.battle!.view()).not.toEqual(
+      expected,
+    );
+
+    game.restoreRuntimeSnapshot(snapshot);
+
+    expect(game.battle!.view()).toEqual(
+      expected,
+    );
+    expect(
+      game.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+  });
+
+  it('restores an active menu app at its exact deterministic tick', () => {
+    const createApp: CreateApp = () => {
+      let ticks = 0;
+      const pressed: string[][] = [];
+
+      return {
+        step(input) {
+          ticks++;
+          pressed.push([...input.pressed]);
+          return null;
+        },
+        view: () =>
+          ({
+            app: 'start-menu',
+            runtimeTest: {
+              ticks,
+              pressed,
+            },
+          }) as never,
+      };
+    };
+
+    const game = createGame(
+      options({ createApp }),
+    );
+
+    // Finish the fixture room's introductory script.
+    game.advance(2);
+    game.press('a');
+    game.advance(2);
+    game.release('a');
+    game.advance(2);
+
+    expect(game.canSave()).toBe(true);
+
+    game.press('x');
+    game.tick();
+    game.release('x');
+
+    game.step({
+      held: [],
+      pressed: ['down'],
+      touch: null,
+    });
+    game.step({
+      held: [],
+      pressed: [],
+      touch: null,
+    });
+
+    const snapshot =
+      game.captureRuntimeSnapshot();
+    const expected =
+      structuredClone(game.app());
+
+    game.step({
+      held: [],
+      pressed: ['up'],
+      touch: null,
+    });
+
+    expect(game.app()).not.toEqual(expected);
+
+    game.restoreRuntimeSnapshot(snapshot);
+
+    expect(game.app()).toEqual(expected);
+    expect(
+      game.captureRuntimeSnapshot(),
+    ).toEqual(snapshot);
+  });
+
+  it('allows runtime snapshots after lazy engine chunks finish loading', async () => {
+    const game = createGame(options({
+      loadBattle: async () =>
+        (() => {
+          throw new Error('unused battle factory');
+        }) as never,
+      loadContestAnimation: async () =>
+        (() => null) as never,
+    }));
+
+    await game.loadBattleEngine();
+
+    expect(
+      () => game.captureRuntimeSnapshot(),
+    ).not.toThrow();
+  });
+
   it('owns the PRNG in state', () => {
     let rng: () => number = () => 0;
     const runner: CreateScriptRunner = (deps) => ((rng = deps.rng), createFakeScriptRunner(deps));
@@ -224,6 +404,29 @@ describe('createGame', () => {
     withArt.load(saveWithArt);
     expect(withArt.state.money).toBe(4321);
     expect(() => createGame(options({ packs: [...fixture(), art({ registries: { items: [] } })] }))).toThrow('a cosmetic pack may only touch sprites, followers, followerTalk, not "items"');
+  });
+
+  it('restores game-owned runtime state exactly', () => {
+    const game = createGame(options());
+    game.state.money = 1234;
+    game.press('a');
+
+    const snapshot = JSON.parse(
+      JSON.stringify(
+        game.captureRuntimeSnapshot(),
+      ),
+    );
+
+    game.state.money = 9999;
+    game.release('a');
+    game.textSpeed = 2;
+
+    game.restoreRuntimeSnapshot(snapshot);
+
+    expect(game.state.money).toBe(1234);
+    expect(game.captureRuntimeSnapshot()).toEqual(
+      snapshot,
+    );
   });
 
   it('hot-reloads edited packs between scripts, keeping the state', () => {

@@ -4,7 +4,7 @@
  * script prints from a bank (ScrCmd_MessageFromBank), and the Jubilife TV questionnaire that unlocks Mystery Gift
  * (ScrCmd_ChooseCustomMessageWord(s), ScrCmd_CheckIsMysteryGiftPhrase, ScrCmd_UnlockMysteryGift).
  */
-import { canReceiveMysteryGift, DEV_EVENTS, giveMysteryGift, MYSTERY_GIFTS, type AppResult } from '@opensinnoh/contracts';
+import { canReceiveMysteryGift, DEV_EVENTS, giveMysteryGift, MYSTERY_GIFTS } from '@opensinnoh/contracts';
 import { easyChatWordText, firstDelivery, mysteryGiftOf, takeFirstDelivery, WORD_NONE } from '@opensinnoh/services';
 import { plainMarkup, TEXT_SPEED, toPrintOps } from '@opensinnoh/text';
 import type { Handler, Runner, Thread } from './runner.ts';
@@ -40,11 +40,15 @@ export function mysteryGiftHandlers(r: Runner): Record<string, Handler> {
       const result = r.ref(a[1], 'var');
       const dests = a.slice(2, 2 + count).map((x) => r.ref(x, 'var'));
       for (const d of dests) r.setVar(t, d, WORD_NONE);
-      return r.openApp(c, { app: 'easy-chat', words: count }, (res: AppResult) => {
-        if (res.app !== 'easy-chat') throw new Error(`choose_custom_message_word: got ${res.app}`);
-        r.setVar(t, result, res.words ? 1 : 0);
-        res.words?.forEach((w, i) => r.setVar(t, dests[i]!, w));
-      });
+      return r.openApp(
+        c,
+        { app: 'easy-chat', words: count },
+        {
+          kind: 'easy-chat',
+          resultVariable: result,
+          wordVariables: dests,
+        },
+      );
     };
 
   return {

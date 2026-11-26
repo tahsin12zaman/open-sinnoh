@@ -70,6 +70,78 @@ export class MapPopupState {
     }
   }
 
+  captureRuntimeSnapshot() {
+    return structuredClone({
+      board: this.board,
+      next: this.next,
+      phase: this.phase,
+      offset: this.offset,
+      timer: this.timer,
+    });
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      Array.isArray(value)
+    ) {
+      throw new Error(
+        'invalid map-popup runtime snapshot',
+      );
+    }
+
+    const snapshot = value as {
+      board: Board | null;
+      next: Board | null;
+      phase: MapPopupView['phase'];
+      offset: number;
+      timer: number;
+    };
+
+    const validBoard = (
+      board: Board | null,
+    ) =>
+      board === null ||
+      (
+        typeof board === 'object' &&
+        typeof board.name === 'string' &&
+        typeof board.window === 'string'
+      );
+
+    if (
+      !validBoard(snapshot.board) ||
+      !validBoard(snapshot.next) ||
+      !['in', 'hold', 'out'].includes(
+        snapshot.phase,
+      ) ||
+      !Number.isSafeInteger(
+        snapshot.offset,
+      ) ||
+      snapshot.offset < 0 ||
+      snapshot.offset >
+        MAP_POPUP_HIDDEN ||
+      !Number.isSafeInteger(
+        snapshot.timer,
+      ) ||
+      snapshot.timer < 0
+    ) {
+      throw new Error(
+        'invalid map-popup runtime snapshot',
+      );
+    }
+
+    this.board = snapshot.board
+      ? { ...snapshot.board }
+      : null;
+    this.next = snapshot.next
+      ? { ...snapshot.next }
+      : null;
+    this.phase = snapshot.phase;
+    this.offset = snapshot.offset;
+    this.timer = snapshot.timer;
+  }
+
   view(): MapPopupView | null {
     return this.board && { ...this.board, offset: this.offset, phase: this.phase };
   }

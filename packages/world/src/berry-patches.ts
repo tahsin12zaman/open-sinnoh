@@ -125,6 +125,15 @@ export class WateringTask {
     return task;
   }
 
+  restoreRuntimeSnapshot(
+    snapshot: RuntimeWateringTaskSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      WateringTask.restore(snapshot, this.host),
+    );
+  }
+
   get done(): boolean {
     return this.phase === 'done';
   }

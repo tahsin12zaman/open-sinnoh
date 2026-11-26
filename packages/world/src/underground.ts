@@ -49,7 +49,7 @@ import {
   UNDERGROUND_LIMITS,
   type ClockTime,
   type Id,
-  type Rand32,
+  Rand32,
   type TrapEffect,
 } from '@opensinnoh/core';
 import {
@@ -110,6 +110,11 @@ const ENTRANCE_GOOD = 129;
 /** records.c DECORATION_MESSAGES_START: the goods' writing starts at the records bank's SomethingWrittenTotalScore. */
 const WRITING_FIRST = 'UndergroundRecords_Text_SomethingWrittenTotalScore';
 
+export type UndergroundBaseMoveContinuation =
+  | 'exit'
+  | 'enter-open'
+  | 'enter-closed';
+
 export interface UndergroundHost {
   reg: Registries;
   state: GameState;
@@ -133,8 +138,13 @@ export interface UndergroundHost {
   clock(): ClockTime;
   /** A text record's markup (names in slots keep their colour codes). */
   text(id: Id): string;
-  /** SecretBases_MoveToFromSecretBaseTask: the fade and the move within the Underground; `then` once it has faded back in. */
-  baseMove(x: number, z: number, facing: Facing, then: () => void): void;
+  /** SecretBases_MoveToFromSecretBaseTask: a serializable continuation runs after the fade back in. */
+  baseMove(
+    x: number,
+    z: number,
+    facing: Facing,
+    continuation: UndergroundBaseMoveContinuation,
+  ): void;
   trainerScore(event: number): void;
   stub(key: string, detail: string): void;
 }
@@ -156,6 +166,44 @@ const TV_TRAPS_RECORD = 10;
 /** sub_0206DEEC: the count it keeps. */
 const TV_TRAPS_MAX = 999;
 const ugTile = (x: number, z: number) => [tileCentre(x), 0, tileCentre(z)] as [number, number, number];
+
+export interface UndergroundFieldRuntimeSnapshot {
+  log: string[];
+  blips: ({ x: number; z: number } | null)[];
+  still: number;
+  sparkleTimer: number;
+  notices: { text: Id; slots: string[] }[];
+  request: UndergroundRequest | null;
+  radarSeed: number;
+  mining: string | null;
+  running: Running | null;
+  toolSpent: boolean;
+  drilling: {
+    x: number;
+    z: number;
+    dir: Facing;
+    slot: number;
+  } | null;
+  closed: boolean;
+  touch: {
+    x: number;
+    z: number;
+    tick: number;
+    found: ReturnType<typeof touchRadar>;
+  } | null;
+  touchCooldown: number;
+  decoration: UndergroundDecorationView | null;
+  moving: boolean;
+  retrieved: {
+    count: number;
+    trap: number;
+  };
+  emote:
+    | { kind: 'exclamation' }
+    | { kind: 'ok'; ticks: number }
+    | null;
+  trapShadow: number | null;
+}
 
 export class UndergroundField {
   private readonly log: string[] = [];
@@ -196,6 +244,78 @@ export class UndergroundField {
   trapShadow: number | null = null;
 
   constructor(private readonly h: UndergroundHost) {}
+
+  capture(): UndergroundFieldRuntimeSnapshot {
+    return structuredClone({
+      log: this.log,
+      blips: this.blips,
+      still: this.still,
+      sparkleTimer: this.sparkleTimer,
+      notices: this.notices,
+      request: this.request,
+      radarSeed: this.radarSeed,
+      mining: this.mining?.state() ?? null,
+      running: this.running,
+      toolSpent: this.toolSpent,
+      drilling: this.drilling,
+      closed: this.closed,
+      touch: this.touch,
+      touchCooldown: this.touchCooldown,
+      decoration: this.decoration,
+      moving: this.moving,
+      retrieved: this.retrieved,
+      emote: this.emote,
+      trapShadow: this.trapShadow,
+    });
+  }
+
+  static restore(
+    h: UndergroundHost,
+    snapshot: UndergroundFieldRuntimeSnapshot,
+  ): UndergroundField {
+    const field = new UndergroundField(h);
+
+    field.log.splice(0, field.log.length, ...snapshot.log);
+    field.blips.splice(
+      0,
+      field.blips.length,
+      ...structuredClone(snapshot.blips),
+    );
+    field.still = snapshot.still;
+    field.sparkleTimer = snapshot.sparkleTimer;
+    field.notices.splice(
+      0,
+      field.notices.length,
+      ...structuredClone(snapshot.notices),
+    );
+    field.request = structuredClone(snapshot.request);
+    field.radarSeed = snapshot.radarSeed;
+    field.mining = snapshot.mining === null
+      ? null
+      : new Rand32(BigInt(snapshot.mining));
+    field.running = structuredClone(snapshot.running);
+    field.toolSpent = snapshot.toolSpent;
+    field.drilling = structuredClone(snapshot.drilling);
+    field.closed = snapshot.closed;
+    field.touch = structuredClone(snapshot.touch);
+    field.touchCooldown = snapshot.touchCooldown;
+    field.decoration = structuredClone(snapshot.decoration);
+    field.moving = snapshot.moving;
+    field.retrieved = { ...snapshot.retrieved };
+    field.emote = structuredClone(snapshot.emote);
+    field.trapShadow = snapshot.trapShadow;
+
+    return field;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: UndergroundFieldRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      UndergroundField.restore(this.h, snapshot),
+    );
+  }
 
   /** TrapsEnv_Free as the player leaves the Underground: ten or more traps dug up make the TV's traps record (sub_0206DEEC). */
   leave(): void {
@@ -684,10 +804,12 @@ export class UndergroundField {
         const [dx, dz] = DELTA[e.dir];
         this.moving = true;
         this.h.playSe('SEQ_SE_DP_KAIDAN2');
-        this.h.baseMove(e.x + dx, e.z + dz, e.dir, () => {
-          this.moving = false;
-          this.closed = false;
-        });
+        this.h.baseMove(
+          e.x + dx,
+          e.z + dz,
+          e.dir,
+          'exit',
+        );
         return;
       }
     }
@@ -701,13 +823,29 @@ export class UndergroundField {
     const chunk = closed ? 0 : 1;
     this.moving = true;
     this.h.playSe('SEQ_SE_DP_KAIDAN2');
-    this.h.baseMove(chunk * BASE.width + BASE.exit.x, BASE.exit.z - 1, 'up', () => {
-      this.moving = false;
-      this.closed = closed;
-      if (!closed) return;
-      this.h.playSe('SEQ_SE_DP_DOOR');
-      this.say('UndergroundCommon_Text_BlockedEntranceToDecorate');
-    });
+    this.h.baseMove(
+      chunk * BASE.width + BASE.exit.x,
+      BASE.exit.z - 1,
+      'up',
+      closed ? 'enter-closed' : 'enter-open',
+    );
+  }
+
+  baseMoveDone(
+    continuation: UndergroundBaseMoveContinuation,
+  ): void {
+    this.moving = false;
+    this.closed =
+      continuation === 'enter-closed';
+
+    if (continuation !== 'enter-closed') {
+      return;
+    }
+
+    this.h.playSe('SEQ_SE_DP_DOOR');
+    this.say(
+      'UndergroundCommon_Text_BlockedEntranceToDecorate',
+    );
   }
 
   /** The decoration's camera target (UndergroundPC_MoveCamera: (15, 17) of the base), world units; null when none runs. */

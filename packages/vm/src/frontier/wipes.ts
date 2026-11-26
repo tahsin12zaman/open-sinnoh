@@ -9,6 +9,93 @@
  */
 import type { FrontierWipeView } from '@opensinnoh/contracts';
 
+export interface BlockWipeRuntimeSnapshot {
+  kind: 'block-wipe';
+  direction: 'rows' | 'columns';
+  frames: number;
+  interval: number;
+  elapsed: number;
+}
+
+export interface LineWipeRuntimeSnapshot {
+  kind: 'line-wipe';
+  mode: 1 | 2;
+  layers: {
+    bg: LineLayer;
+    fg: LineLayer;
+  };
+  moved: {
+    x: number;
+    y: number;
+  }[];
+  bgHidden: boolean;
+}
+
+const record = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value);
+
+const finitePoint = (
+  value: unknown,
+): value is { x: number; y: number } =>
+  record(value) &&
+  typeof value.x === 'number' &&
+  Number.isFinite(value.x) &&
+  typeof value.y === 'number' &&
+  Number.isFinite(value.y);
+
+const lineLayer = (
+  value: unknown,
+): value is LineLayer =>
+  record(value) &&
+  finitePoint(value.origin) &&
+  typeof value.offset === 'number' &&
+  Number.isFinite(value.offset);
+
+export function validateBlockWipeRuntimeSnapshot(
+  value: unknown,
+): value is BlockWipeRuntimeSnapshot {
+  if (!record(value)) return false;
+
+  return (
+    value.kind === 'block-wipe' &&
+    (
+      value.direction === 'rows' ||
+      value.direction === 'columns'
+    ) &&
+    Number.isSafeInteger(value.frames) &&
+    (value.frames as number) > 0 &&
+    Number.isSafeInteger(value.interval) &&
+    (value.interval as number) > 0 &&
+    Number.isSafeInteger(value.elapsed) &&
+    (value.elapsed as number) >= 0
+  );
+}
+
+export function validateLineWipeRuntimeSnapshot(
+  value: unknown,
+): value is LineWipeRuntimeSnapshot {
+  if (
+    !record(value) ||
+    value.kind !== 'line-wipe' ||
+    (value.mode !== 1 && value.mode !== 2) ||
+    !record(value.layers) ||
+    !lineLayer(value.layers.bg) ||
+    !lineLayer(value.layers.fg) ||
+    !Array.isArray(value.moved) ||
+    value.moved.length !== 96 ||
+    !value.moved.every(finitePoint) ||
+    typeof value.bgHidden !== 'boolean'
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 /** Decomp ov104_0223EA28 / EA38: a value from `start` by `diff` over `frames` steps (C division). */
 class Lerp {
   value: number;
@@ -96,6 +183,7 @@ export class BlockWipe {
   private dir = 0;
   private timer = 0;
   private active = true;
+  private elapsed = 0;
 
   constructor(
     private readonly kind: 'rows' | 'columns',
@@ -113,6 +201,7 @@ export class BlockWipe {
   /** One frame; true once every block has finished. */
   step(): boolean {
     if (!this.active) return true;
+    this.elapsed++;
     if (this.started < BLOCKS && --this.timer <= 0) {
       this.timer = this.interval;
       if (this.kind === 'rows') this.startRows();
@@ -169,6 +258,42 @@ export class BlockWipe {
       this.across++;
       this.along = 0;
     }
+  }
+
+  captureRuntimeSnapshot(): BlockWipeRuntimeSnapshot {
+    return {
+      kind: 'block-wipe',
+      direction: this.kind,
+      frames: this.frames,
+      interval: this.interval,
+      elapsed: this.elapsed,
+    };
+  }
+
+  static restoreRuntimeSnapshot(
+    value: unknown,
+  ): BlockWipe {
+    if (!validateBlockWipeRuntimeSnapshot(value)) {
+      throw new Error(
+        'Invalid Frontier block-wipe runtime snapshot.',
+      );
+    }
+
+    const wipe = new BlockWipe(
+      value.direction,
+      value.frames,
+      value.interval,
+    );
+
+    for (
+      let elapsed = 0;
+      elapsed < value.elapsed;
+      elapsed++
+    ) {
+      wipe.step();
+    }
+
+    return wipe;
   }
 
   view(): FrontierWipeView {
@@ -232,6 +357,49 @@ export class LineWipe {
       }
       return { x: layer.origin.x + x, y: layer.origin.y + y };
     });
+  }
+
+  captureRuntimeSnapshot(): LineWipeRuntimeSnapshot {
+    return {
+      kind: 'line-wipe',
+      mode: this.mode,
+      layers: {
+        bg: {
+          origin: { ...this.layers.bg.origin },
+          offset: this.layers.bg.offset,
+        },
+        fg: {
+          origin: { ...this.layers.fg.origin },
+          offset: this.layers.fg.offset,
+        },
+      },
+      moved: this.moved.map((point) => ({
+        ...point,
+      })),
+      bgHidden: this.bgHidden,
+    };
+  }
+
+  static restoreRuntimeSnapshot(
+    value: unknown,
+  ): LineWipe {
+    if (!validateLineWipeRuntimeSnapshot(value)) {
+      throw new Error(
+        'Invalid Frontier line-wipe runtime snapshot.',
+      );
+    }
+
+    const wipe = new LineWipe(
+      value.mode,
+      structuredClone(value.layers),
+    );
+
+    value.moved.forEach((point, index) => {
+      wipe.moved[index] = { ...point };
+    });
+
+    wipe.bgHidden = value.bgHidden;
+    return wipe;
   }
 
   view(): FrontierWipeView {

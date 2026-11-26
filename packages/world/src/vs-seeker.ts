@@ -48,6 +48,14 @@ export interface VsSeekerHost {
 
 type Phase = 'wait-npcs' | 'check' | 'start' | 'wait-player' | 'pick' | 'wait-anims' | 'wait-se' | 'done';
 
+export interface VsSeekerRuntimeSnapshot {
+  phase: Phase;
+  trainers: number[];
+  animating: number[];
+  outcome: number | null;
+  result: number;
+}
+
 export class VsSeekerTask {
   private phase: Phase = 'wait-npcs';
   private trainers: Actor[] = [];
@@ -56,6 +64,60 @@ export class VsSeekerTask {
   private result: number = VS_SEEKER_RESULT.ok;
 
   constructor(private readonly h: VsSeekerHost) {}
+
+  capture(): VsSeekerRuntimeSnapshot {
+    const objects = this.h.objects();
+    const indexOf = (actor: Actor): number => {
+      const index = objects.indexOf(actor);
+      if (index < 0) {
+        throw new Error(
+          'Vs. Seeker actor is absent from the world',
+        );
+      }
+      return index;
+    };
+
+    return {
+      phase: this.phase,
+      trainers: this.trainers.map(indexOf),
+      animating: this.animating.map(indexOf),
+      outcome: this.outcome,
+      result: this.result,
+    };
+  }
+
+  static restore(
+    h: VsSeekerHost,
+    snapshot: VsSeekerRuntimeSnapshot,
+  ): VsSeekerTask {
+    const objects = h.objects();
+    const actorAt = (index: number): Actor => {
+      const actor = objects[index];
+      if (!actor) {
+        throw new Error(
+          `Vs. Seeker snapshot has no actor ${index}`,
+        );
+      }
+      return actor;
+    };
+
+    const task = new VsSeekerTask(h);
+    task.phase = snapshot.phase;
+    task.trainers = snapshot.trainers.map(actorAt);
+    task.animating = snapshot.animating.map(actorAt);
+    task.outcome = snapshot.outcome;
+    task.result = snapshot.result;
+    return task;
+  }
+
+  restoreRuntimeSnapshot(
+    snapshot: VsSeekerRuntimeSnapshot,
+  ): void {
+    Object.assign(
+      this,
+      VsSeekerTask.restore(this.h, snapshot),
+    );
+  }
 
   /** The VS_SEEKER_USE_RESULT_* once the task is over, else null. */
   done(): number | null {

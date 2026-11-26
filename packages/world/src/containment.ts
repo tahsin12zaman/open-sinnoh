@@ -1,4 +1,14 @@
 /** The prop manager's two independent channels; task checks precede animation advancement. */
+export interface ContainmentUnitsRuntimeSnapshot {
+  loopFrames: number;
+  openingFrames: number;
+  loop: number;
+  opening: number;
+  paused: boolean;
+  openRunning: boolean;
+  phase: 'loop' | 'start' | 'open' | null;
+}
+
 export class ContainmentUnits {
   loop = 0;
   opening = 0;
@@ -13,6 +23,34 @@ export class ContainmentUnits {
   ) {
     this.paused = freed;
     if (freed) this.opening = openingFrames - 1;
+  }
+
+  capture(): ContainmentUnitsRuntimeSnapshot {
+    return {
+      loopFrames: this.loopFrames,
+      openingFrames: this.openingFrames,
+      loop: this.loop,
+      opening: this.opening,
+      paused: this.paused,
+      openRunning: this.openRunning,
+      phase: this.phase,
+    };
+  }
+
+  static restore(
+    snapshot: ContainmentUnitsRuntimeSnapshot,
+  ): ContainmentUnits {
+    const units = new ContainmentUnits(
+      snapshot.loopFrames,
+      snapshot.openingFrames,
+      false,
+    );
+    units.loop = snapshot.loop;
+    units.opening = snapshot.opening;
+    units.paused = snapshot.paused;
+    units.openRunning = snapshot.openRunning;
+    units.phase = snapshot.phase;
+    return units;
   }
 
   deactivate(): void {

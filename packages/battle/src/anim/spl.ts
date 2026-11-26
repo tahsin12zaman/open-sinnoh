@@ -7,7 +7,16 @@
  */
 import type { AnimParticle, ParticleEmitter, ParticleSystem } from '@opensinnoh/contracts';
 import type { Id } from '@opensinnoh/core';
-import { dirToView, PX_PER_UNIT, SCREEN_CENTER, toView, type ParticleCamera, type ViewMatrix } from './camera.ts';
+import {
+  dirToView,
+  PX_PER_UNIT,
+  SCREEN_CENTER,
+  toView,
+  validateParticleCameraRuntimeSnapshot,
+  type ParticleCamera,
+  type ParticleCameraRuntimeSnapshot,
+  type ViewMatrix,
+} from './camera.ts';
 import { cosIdx, cross, fxMul, idiv, normalize, s16, sinIdx, type Vec } from './fx.ts';
 
 export const MAX_EMITTERS = 20;
@@ -51,7 +60,7 @@ export class SplRandom {
   }
 }
 
-interface Particle {
+export interface ParticleRuntimeSnapshot {
   pos: Vec;
   vel: Vec;
   rotation: number;
@@ -69,6 +78,8 @@ interface Particle {
   color: number;
   emitterPos: Vec;
 }
+
+type Particle = ParticleRuntimeSnapshot;
 
 export class Emitter {
   particles: Particle[] = [];
@@ -137,6 +148,216 @@ export class Emitter {
   }
 }
 
+const captureEmitterState = (
+  emitter: Emitter,
+) => ({
+  particles: structuredClone(emitter.particles),
+  children: structuredClone(emitter.children),
+  terminate: emitter.terminate,
+  started: emitter.started,
+  paused: emitter.paused,
+  emissionPaused: emitter.emissionPaused,
+  renderingDisabled: emitter.renderingDisabled,
+  position: [...emitter.position] as Vec,
+  velocity: [...emitter.velocity] as Vec,
+  particleInitVelocity: [
+    ...emitter.particleInitVelocity,
+  ] as Vec,
+  age: emitter.age,
+  emissionFraction: emitter.emissionFraction,
+  axis: [...emitter.axis] as Vec,
+  initAngle: emitter.initAngle,
+  count: emitter.count,
+  radius: emitter.radius,
+  length: emitter.length,
+  velPos: emitter.velPos,
+  velAxis: emitter.velAxis,
+  baseScale: emitter.baseScale,
+  particleLife: emitter.particleLife,
+  color: emitter.color,
+  interval: emitter.interval,
+  baseAlpha: emitter.baseAlpha,
+  collisionPlaneHeight:
+    emitter.collisionPlaneHeight,
+  textureS: emitter.textureS,
+  textureT: emitter.textureT,
+  childTextureS: emitter.childTextureS,
+  childTextureT: emitter.childTextureT,
+  crossAxis1: [...emitter.crossAxis1] as Vec,
+  crossAxis2: [...emitter.crossAxis2] as Vec,
+});
+
+export type EmitterRuntimeState =
+  ReturnType<typeof captureEmitterState>;
+
+export interface ParticleManagerRuntimeSnapshot {
+  kind: 'particle-manager';
+  system: Id;
+  rngState: number;
+  camera: ParticleCameraRuntimeSnapshot;
+  resources: ParticleEmitter[];
+  particleCount: number;
+  emitters: {
+    resource: number;
+    state: EmitterRuntimeState;
+  }[];
+}
+
+const snapshotRecord = (
+  value: unknown,
+): value is Record<string, unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value);
+
+const snapshotNumber = (
+  value: unknown,
+): value is number =>
+  typeof value === 'number' &&
+  Number.isFinite(value);
+
+const snapshotInteger = (
+  value: unknown,
+): value is number =>
+  snapshotNumber(value) &&
+  Number.isSafeInteger(value);
+
+const snapshotVector = (
+  value: unknown,
+): value is Vec =>
+  Array.isArray(value) &&
+  value.length === 3 &&
+  value.every(snapshotNumber);
+
+const PARTICLE_NUMBERS = [
+  'rotation',
+  'angularVelocity',
+  'life',
+  'age',
+  'loopTimeFactor',
+  'lifeTimeFactor',
+  'texture',
+  'lifeRateOffset',
+  'baseAlpha',
+  'animAlpha',
+  'baseScale',
+  'animScale',
+  'color',
+] as const;
+
+const validateParticle = (
+  value: unknown,
+): value is ParticleRuntimeSnapshot => {
+  if (
+    !snapshotRecord(value) ||
+    !snapshotVector(value.pos) ||
+    !snapshotVector(value.vel) ||
+    !snapshotVector(value.emitterPos)
+  ) {
+    return false;
+  }
+
+  return PARTICLE_NUMBERS.every(
+    (key) => snapshotNumber(value[key]),
+  );
+};
+
+const EMITTER_BOOLEANS = [
+  'terminate',
+  'started',
+  'paused',
+  'emissionPaused',
+  'renderingDisabled',
+] as const;
+
+const EMITTER_NUMBERS = [
+  'age',
+  'emissionFraction',
+  'initAngle',
+  'count',
+  'radius',
+  'length',
+  'velPos',
+  'velAxis',
+  'baseScale',
+  'particleLife',
+  'color',
+  'interval',
+  'baseAlpha',
+  'textureS',
+  'textureT',
+  'childTextureS',
+  'childTextureT',
+] as const;
+
+const validateEmitterState = (
+  value: unknown,
+): value is EmitterRuntimeState => {
+  if (
+    !snapshotRecord(value) ||
+    !Array.isArray(value.particles) ||
+    !value.particles.every(validateParticle) ||
+    !Array.isArray(value.children) ||
+    !value.children.every(validateParticle) ||
+    !snapshotVector(value.position) ||
+    !snapshotVector(value.velocity) ||
+    !snapshotVector(
+      value.particleInitVelocity,
+    ) ||
+    !snapshotVector(value.axis) ||
+    !snapshotVector(value.crossAxis1) ||
+    !snapshotVector(value.crossAxis2) ||
+    !EMITTER_BOOLEANS.every(
+      (key) => typeof value[key] === 'boolean',
+    ) ||
+    !EMITTER_NUMBERS.every(
+      (key) => snapshotNumber(value[key]),
+    ) ||
+    !(
+      value.collisionPlaneHeight === null ||
+      snapshotNumber(
+        value.collisionPlaneHeight,
+      )
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+};
+
+export function validateParticleManagerRuntimeSnapshot(
+  value: unknown,
+): value is ParticleManagerRuntimeSnapshot {
+  if (
+    !snapshotRecord(value) ||
+    value.kind !== 'particle-manager' ||
+    typeof value.system !== 'string' ||
+    !snapshotInteger(value.rngState) ||
+    value.rngState < 0 ||
+    value.rngState > 0xffffffff ||
+    !validateParticleCameraRuntimeSnapshot(
+      value.camera,
+    ) ||
+    !Array.isArray(value.resources) ||
+    !snapshotInteger(value.particleCount) ||
+    value.particleCount < 0 ||
+    !Array.isArray(value.emitters)
+  ) {
+    return false;
+  }
+
+  return value.emitters.every(
+    (entry) =>
+      snapshotRecord(entry) &&
+      snapshotInteger(entry.resource) &&
+      entry.resource >= 0 &&
+      entry.resource <
+        (value.resources as unknown[]).length &&
+      validateEmitterState(entry.state),
+  );
+};
+
 const flag = (e: ParticleEmitter, bit: number) => ((e.flags >>> bit) & 1) === 1;
 const R5 = (c: number) => c & 31;
 const G5 = (c: number) => (c >> 5) & 31;
@@ -161,6 +382,91 @@ export class ParticleManager {
 
   get textures(): Id {
     return this.system.textures;
+  }
+
+  captureRuntimeSnapshot(): ParticleManagerRuntimeSnapshot {
+    return {
+      kind: 'particle-manager',
+      system: this.system.id,
+      rngState: this.rng.state,
+      camera:
+        this.camera.captureRuntimeSnapshot(),
+      resources: structuredClone(
+        this.resources,
+      ),
+      particleCount: this.particleCount,
+      emitters: this.emitters.map(
+        (emitter) => {
+          const resource =
+            this.resources.indexOf(emitter.res);
+
+          if (resource < 0) {
+            throw new Error(
+              'Particle emitter resource is not owned by its manager.',
+            );
+          }
+
+          return {
+            resource,
+            state:
+              captureEmitterState(emitter),
+          };
+        },
+      ),
+    };
+  }
+
+  restoreRuntimeSnapshot(
+    value: unknown,
+  ): void {
+    if (
+      !validateParticleManagerRuntimeSnapshot(
+        value,
+      )
+    ) {
+      throw new Error(
+        'Invalid particle manager runtime snapshot.',
+      );
+    }
+
+    if (value.system !== this.system.id) {
+      throw new Error(
+        `Particle snapshot is for ${value.system}, not ${this.system.id}.`,
+      );
+    }
+
+    this.camera.restoreRuntimeSnapshot(
+      value.camera,
+    );
+    this.rng.state = value.rngState;
+
+    this.resources.splice(
+      0,
+      this.resources.length,
+      ...structuredClone(value.resources),
+    );
+
+    this.particleCount =
+      value.particleCount;
+
+    this.emitters = value.emitters.map(
+      (snapshot) => {
+        const resource =
+          this.resources[snapshot.resource]!;
+
+        const emitter = new Emitter(
+          resource,
+          [0, 0, 0],
+        );
+
+        Object.assign(
+          emitter,
+          structuredClone(snapshot.state),
+        );
+
+        return emitter;
+      },
+    );
   }
 
   /** SPLManager_CreateEmitterWithCallback: the callback runs before the emitter is listed. */

@@ -49,11 +49,87 @@ export function honeyTreePlacements(reg: Registries, matrixId: Id, tables: Speci
 }
 
 /** The shaking trees: placement key → the clip and the tick it started. */
+export interface HoneyTreeShakesRuntimeSnapshot {
+  shaking: [
+    string,
+    {
+      tree: number;
+      clip: number;
+      since: number;
+    },
+  ][];
+  loaded: number[];
+}
+
 export class HoneyTreeShakes {
   private shaking = new Map<string, { tree: number; clip: number; since: number }>();
   private loaded = new Set<number>();
 
   constructor(private readonly placements: readonly HoneyTreePlacement[], private readonly width: number) {}
+
+  captureRuntimeSnapshot(): HoneyTreeShakesRuntimeSnapshot {
+    return structuredClone({
+      shaking: [...this.shaking],
+      loaded: [...this.loaded],
+    });
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
+      throw new Error(
+        'invalid honey-tree runtime snapshot',
+      );
+    }
+
+    const snapshot =
+      value as Partial<HoneyTreeShakesRuntimeSnapshot>;
+
+    if (
+      !Array.isArray(snapshot.shaking) ||
+      !snapshot.shaking.every(
+        (entry) =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          typeof entry[0] === 'string' &&
+          entry[1] !== null &&
+          typeof entry[1] === 'object' &&
+          Number.isSafeInteger(entry[1].tree) &&
+          Number.isSafeInteger(entry[1].clip) &&
+          Number.isSafeInteger(entry[1].since),
+      ) ||
+      !Array.isArray(snapshot.loaded) ||
+      !snapshot.loaded.every(Number.isSafeInteger)
+    ) {
+      throw new Error(
+        'invalid honey-tree runtime fields',
+      );
+    }
+
+    const placementKeys = new Set(
+      this.placements.map(
+        (placement) => placement.key,
+      ),
+    );
+
+    if (
+      snapshot.shaking.some(
+        ([key]) => !placementKeys.has(key),
+      )
+    ) {
+      throw new Error(
+        'honey-tree snapshot has an unknown placement',
+      );
+    }
+
+    this.shaking = new Map(
+      structuredClone(snapshot.shaking),
+    );
+    this.loaded = new Set(snapshot.loaded);
+  }
 
   /**
    * The player's chunk is `cell`: trees in newly loaded chunks start shaking when a Pokémon waits (DoTreeShakingAnimation);

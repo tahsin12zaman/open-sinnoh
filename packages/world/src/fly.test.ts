@@ -52,6 +52,63 @@ describe('Fly (hm_cut_in.c sCutInTaskFuncsFly, the landing; FieldTask_MapChangeF
   });
 });
 
+describe('Fly runtime snapshots', () => {
+  it('restores the complete Fly task at the exact tick', () => {
+    const originalHost = host();
+    const restoredHost = host();
+    const original = new FlyTask(originalHost);
+
+    for (let tick = 0; tick < 70; tick++) {
+      original.tick();
+      originalHost.tick();
+      restoredHost.tick();
+    }
+
+    const snapshot = original.capture();
+    const restored = FlyTask.restore(
+      restoredHost,
+      snapshot,
+    );
+
+    expect(restored.capture()).toEqual(snapshot);
+
+    for (let tick = 0; tick < 300; tick++) {
+      expect(
+        restored.view('male', {
+          species: 'x:S' as never,
+          form: 0,
+          shiny: false,
+          female: false,
+        }),
+      ).toEqual(
+        original.view('male', {
+          species: 'x:S' as never,
+          form: 0,
+          shiny: false,
+          female: false,
+        }),
+      );
+
+      if (original.done || restored.done) {
+        expect(restored.done).toBe(original.done);
+        break;
+      }
+
+      original.tick();
+      restored.tick();
+      originalHost.tick();
+      restoredHost.tick();
+
+      expect(restored.capture()).toEqual(
+        original.capture(),
+      );
+    }
+
+    expect(original.done).toBe(true);
+    expect(restored.done).toBe(true);
+  });
+});
+
 describe('Teleport (field_warp.c sDigTeleportStates, sFieldWarpFadeInStates)', () => {
   it('the cut-in, the spin out, the fade to black, the map change, the spin in, then done', () => {
     const log: string[] = [];

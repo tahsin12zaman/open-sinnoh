@@ -81,7 +81,7 @@ import { HealMachine } from './heal-machine.ts';
 import { PartyFollower } from './party-follower.ts';
 import { EternaGym, PastoriaGym, SunyshoreGym, createMapFeature, initMapFeatures, type FeatureHost, type MapFeature } from './gyms/index.ts';
 import { DistortionWorld } from './distortion/feature.ts';
-import { SPARKLE_RENDERER, UndergroundField, undergroundArrival, undergroundTables } from './underground.ts';
+import { type UndergroundBaseMoveContinuation, SPARKLE_RENDERER, UndergroundField, undergroundArrival, undergroundTables } from './underground.ts';
 import { UgTransition, type UgTransitionPart } from './underground-transition.ts';
 
 /** The destroy-obstacle effect's animations are 45 frames (graphic/hiden_effect, ov6_02248050). */
@@ -231,6 +231,8 @@ export class FieldWorld implements OpenSinnohWorld {
   private fadeAlpha = 0;
   private fadeColor: 'black' | 'white' = 'black';
   private loads = 0;
+  /** Suppresses outward map-load notifications while rehydrating an exact runtime image. */
+  private restoringRuntime = false;
   /** Zone connections so far, and the objects the latest one deleted (FieldView.departed; null after a map load). */
   private crossings = 0;
   private departed: FieldView['departed'] | null = null;
@@ -249,7 +251,7 @@ export class FieldWorld implements OpenSinnohWorld {
   /** Terrain-driven field effects (FieldView.effects) and the player avatar (walk/cycle/surf, HM tasks). */
   private readonly effects: Effects;
   /** Walks whose start the grass hook has seen. */
-  private readonly grassSeen = new WeakSet<Motion>();
+  private readonly grassSeen = new Set<Motion>();
   private readonly avatar: Avatar;
   /** The last warp event that fired (decomp FieldOverworldState entrance location); not saved. */
   private entrance: Location | null = null;
@@ -305,7 +307,15 @@ export class FieldWorld implements OpenSinnohWorld {
   private cutIn: HmCutIn | null = null;
   private shownCutIn: HmCutIn | null = null;
   /** Fly (`fly`): the cut-in, the map change and the landing; the Pokémon that flies. */
-  private flyTask: { task: FlyTask; slot: number } | null = null;
+  private flyTask: {
+    task: FlyTask;
+    slot: number;
+    destination: {
+      zone: Id;
+      x: number;
+      z: number;
+    };
+  } | null = null;
   /** Teleport (`teleport`). */
   private teleportTask: TeleportTask | null = null;
   /** The Poké Radar's chain (poke-radar.ts); null in packs without the special encounters. */
@@ -332,7 +342,10 @@ export class FieldWorld implements OpenSinnohWorld {
    * rise: `anim`), `load` (the map change once the BGM is quiet), `arrive` (the fall or the jump out), `settle` (the top
    * screen's 30-frame fade after going down: `wait`). The base's: `out` and `in`, the fades around the move.
    */
-  private ugTransit: { phase: 'out' | 'in' | 'top' | 'start' | 'load' | 'arrive' | 'settle'; zone: Id; x: number; z: number; down: boolean; base?: { facing: Facing; then: () => void }; anim?: UgTransition; wait?: number } | null = null;
+  private ugTransit: { phase: 'out' | 'in' | 'top' | 'start' | 'load' | 'arrive' | 'settle'; zone: Id; x: number; z: number; down: boolean; base?: {
+    facing: Facing;
+    continuation: UndergroundBaseMoveContinuation;
+  }; anim?: UgTransition; wait?: number } | null = null;
 
   constructor(
     private readonly reg: Registries,
@@ -416,6 +429,769 @@ export class FieldWorld implements OpenSinnohWorld {
    * local IDs and feature-owned actors are legal; object references held by tasks remain keyed to the same
    * live Actor instances during restore.
    */
+  captureRuntimeSnapshot() {
+    const actorKey = (actor: Actor): string | null => {
+      if (actor === this.hero) return 'hero';
+      if (actor === this.camera) return 'camera';
+      if (actor === this.pet.actor) return 'follower';
+      for (const [key, candidate] of this.actors) {
+        if (candidate === actor) return `actor:${key}`;
+      }
+      return null;
+    };
+
+    const grassSeen: string[] = [];
+    for (const actor of this.allActors()) {
+      if (
+        actor.motion &&
+        this.grassSeen.has(actor.motion)
+      ) {
+        const key = actorKey(actor);
+        if (key) grassSeen.push(key);
+      }
+    }
+
+    return structuredClone({
+      kind: 'field-world-runtime' as const,
+      zone: this.zone.id,
+      actors: this.captureActorRuntime(),
+      sighting: this.sighting,
+      approaches: this.approaches,
+      obstacleTicks: this.obstacleTicks,
+      encounterAttempts:
+        this.encounterAttempts.count,
+      wildFoe: this.wildFoe,
+      lastTile: this.lastTile,
+      area: this.area,
+      locked: this.locked,
+      lockedObjects: [...this.lockedObjects],
+      stepCompleted: this.stepCompleted,
+      stepCount: this.stepCount,
+      moving: this.moving,
+      storyScene: this.storyScene,
+      containment:
+        this.containment?.capture() ?? null,
+      warpState: this.warpState,
+      fadeAnim: this.fadeAnim,
+      fadeAlpha: this.fadeAlpha,
+      fadeColor: this.fadeColor,
+      loads: this.loads,
+      crossings: this.crossings,
+      departed: this.departed,
+      cameraYHistory: this.cameraYHistory,
+      cameraCur: this.cameraCur,
+      cameraPrev: this.cameraPrev,
+      doors: this.doors,
+      cameraOffset: this.cameraOffset,
+      entrance: this.entrance,
+      fishing: this.fishing?.capture() ?? null,
+      shake: this.shake?.capture() ?? null,
+      elevatorRide:
+        this.elevatorRide?.capture() ?? null,
+      healMachine:
+        this.healMachine?.capture() ?? null,
+      boat: this.boat?.capture() ?? null,
+      lookout: this.lookout
+        ? this.lookout instanceof GreatMarshLookout
+          ? {
+              kind: 'great-marsh' as const,
+              state: this.lookout.capture(),
+            }
+          : {
+              kind: 'vista' as const,
+              state: this.lookout.capture(),
+            }
+        : null,
+      viewCamera: this.viewCamera,
+      seeker: this.seeker?.capture() ?? null,
+      lookoutInput: this.lookoutInput,
+      boatShip: this.boatShip,
+      cameraShake: this.cameraShake,
+      platformLift:
+        this.platformLift?.capture() ?? null,
+      heightCalc: this.heightCalc,
+      healAvatar: this.healAvatar,
+      flashTicks: this.flashTicks,
+      watering:
+        this.watering?.capture() ?? null,
+      featureSprite: this.featureSprite,
+      weatherTasks:
+        this.weatherTasks.capture(),
+      cutIn: this.cutIn
+        ? {
+            mon: structuredClone(this.cutIn.mon),
+            state: this.cutIn.capture(),
+          }
+        : null,
+      shownCutIn: this.shownCutIn
+        ? {
+            mon: structuredClone(this.shownCutIn.mon),
+            state: this.shownCutIn.capture(),
+          }
+        : null,
+      shownCutInIsCutIn:
+        this.cutIn !== null &&
+        this.shownCutIn === this.cutIn,
+      flyTask: this.flyTask
+        ? {
+            state: this.flyTask.task.capture(),
+            slot: this.flyTask.slot,
+            destination: {
+              ...this.flyTask.destination,
+            },
+          }
+        : null,
+      teleportTask:
+        this.teleportTask?.capture() ?? null,
+      radar: this.radar?.capture() ?? null,
+      radarTask: this.radarTask,
+      sweet: this.sweet?.capture() ?? null,
+      honey:
+        this.honey?.shakes
+          .captureRuntimeSnapshot() ?? null,
+      honeyCell: this.honeyCell,
+      ug: this.ug?.capture() ?? null,
+      ugKeep: this.ugKeep?.capture() ?? null,
+      ugKeepIsUg:
+        this.ug !== null &&
+        this.ugKeep === this.ug,
+      ugTransit: this.ugTransit
+        ? {
+            phase: this.ugTransit.phase,
+            zone: this.ugTransit.zone,
+            x: this.ugTransit.x,
+            z: this.ugTransit.z,
+            down: this.ugTransit.down,
+            ...(this.ugTransit.base
+              ? {
+                  base: {
+                    ...this.ugTransit.base,
+                  },
+                }
+              : {}),
+            anim:
+              this.ugTransit.anim?.capture() ??
+              null,
+            ...(this.ugTransit.wait !== undefined
+              ? { wait: this.ugTransit.wait }
+              : {}),
+          }
+        : null,
+      grassSeen,
+    });
+  }
+
+  validateRuntimeSnapshot(
+    value: unknown,
+  ): string | null {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
+      return 'Invalid field-world runtime snapshot.';
+    }
+
+    const snapshot = value as Partial<
+      ReturnType<FieldWorld['captureRuntimeSnapshot']>
+    >;
+
+    if (
+      snapshot.kind !== 'field-world-runtime' ||
+      typeof snapshot.zone !== 'string' ||
+      !snapshot.actors ||
+      !Array.isArray(snapshot.sighting) ||
+      !Array.isArray(snapshot.approaches) ||
+      !Number.isSafeInteger(snapshot.obstacleTicks) ||
+      !Number.isSafeInteger(snapshot.encounterAttempts) ||
+      !Array.isArray(snapshot.lockedObjects) ||
+      !snapshot.lockedObjects.every(Number.isSafeInteger) ||
+      !Number.isSafeInteger(snapshot.stepCount) ||
+      typeof snapshot.locked !== 'boolean' ||
+      typeof snapshot.stepCompleted !== 'boolean' ||
+      typeof snapshot.moving !== 'boolean' ||
+      !Number.isSafeInteger(snapshot.loads) ||
+      !Number.isSafeInteger(snapshot.crossings) ||
+      !Array.isArray(snapshot.cameraYHistory) ||
+      !Array.isArray(snapshot.cameraCur) ||
+      !Array.isArray(snapshot.cameraPrev) ||
+      !Array.isArray(snapshot.doors) ||
+      !Array.isArray(snapshot.cameraOffset) ||
+      !Array.isArray(snapshot.grassSeen) ||
+      !snapshot.grassSeen.every(
+        (key) => typeof key === 'string',
+      ) ||
+      typeof snapshot.radarTask !== 'boolean' ||
+      typeof snapshot.ugKeepIsUg !== 'boolean' ||
+      typeof snapshot.shownCutInIsCutIn !== 'boolean'
+    ) {
+      return 'Invalid field-world runtime snapshot.';
+    }
+
+    if (
+      !this.reg.zones.has(snapshot.zone as Id)
+    ) {
+      return `Unknown field-world zone ${snapshot.zone}.`;
+    }
+
+    return null;
+  }
+
+  restoreRuntimeSnapshot(value: unknown): void {
+    const error = this.validateRuntimeSnapshot(value);
+
+    if (error) {
+      throw new Error(error);
+    }
+
+    const snapshot = value as ReturnType<
+      FieldWorld['captureRuntimeSnapshot']
+    >;
+    const desiredState = structuredClone(this.state);
+    const player = desiredState.player;
+
+    this.restoringRuntime = true;
+
+    try {
+      this.loadMap(
+        snapshot.zone,
+        player.x,
+        player.z,
+        player.y,
+        player.facing,
+        {
+          objects: desiredState.objects,
+          follower: desiredState.follower,
+        },
+        desiredState.partyFollower,
+      );
+    } finally {
+      this.restoringRuntime = false;
+    }
+
+    // Map loading runs normal initialization scripts. The game participant
+    // already restored the authoritative state, so discard those effects.
+    Object.assign(this.state, desiredState);
+
+    this.fishing = null;
+    if (snapshot.fishing) {
+      const next = () => {
+        const rng = Prng.from(
+          this.state.encounterRng,
+        );
+        const value = rng.next();
+        this.state.encounterRng = rng.save();
+        return value;
+      };
+      const gotAway = () => {
+        this.addGameRecord(RECORD_FISH_GOT_AWAY);
+        saveTvSegment(this.state, {
+          kind: 'fishing',
+          rod: this.rodItem(
+            snapshot.fishing!.rod,
+          ),
+          species: null,
+        });
+      };
+      this.fishing = new FishingTask(
+        snapshot.fishing.rod,
+        snapshot.fishing.roll
+          ? { ...snapshot.fishing.roll }
+          : null,
+        next,
+        (name) => {
+          const ns =
+            this.zone.id.split(':')[0];
+
+          this.scripts.notice(
+            `${ns}:${name}` as Id,
+            [],
+          );
+        },
+        gotAway,
+      );
+    }
+
+    this.boat = null;
+    if (snapshot.boat) {
+      this.playBoatCutscene(
+        snapshot.boat.travelDir,
+        snapshot.boat.exit,
+        snapshot.boat.zone,
+        snapshot.boat.x,
+        snapshot.boat.z,
+      );
+    }
+
+    this.lookout = null;
+    if (snapshot.lookout?.kind === 'great-marsh') {
+      this.greatMarshLookout();
+    } else if (snapshot.lookout?.kind === 'vista') {
+      this.vistaBinoculars();
+    }
+
+    this.seeker = null;
+    if (snapshot.seeker) {
+      this.startVsSeeker();
+    }
+
+    this.watering = null;
+    if (snapshot.watering) {
+      this.startWatering();
+    }
+
+    this.flyTask = null;
+    if (snapshot.flyTask) {
+      this.fly(
+        snapshot.flyTask.slot,
+        snapshot.flyTask.destination,
+      );
+    }
+
+    this.teleportTask = null;
+    if (snapshot.teleportTask) {
+      this.teleport(
+        snapshot.teleportTask.slot,
+        snapshot.teleportTask.destination,
+        snapshot.teleportTask.teleportKind,
+      );
+    }
+
+    this.sweet = null;
+    if (snapshot.sweet) {
+      const tables =
+        newGameRecord(this.reg)
+          .specialEncounters;
+
+      if (!tables) {
+        throw new Error(
+          'Cannot restore Sweet Scent without its tables.',
+        );
+      }
+
+      let cutIn: HmCutIn | null = null;
+
+      if (snapshot.sweet.slot !== null) {
+        const mon =
+          this.state.party[snapshot.sweet.slot];
+
+        if (!mon) {
+          throw new Error(
+            `Cannot restore Sweet Scent party slot ${snapshot.sweet.slot}.`,
+          );
+        }
+
+        cutIn = this.newCutIn(mon);
+      }
+
+      this.sweet = new SweetScentTask(
+        {
+          cutIn,
+          blocked: () =>
+            SWEET_SCENT_BLOCKED_WEATHERS.has(
+              this.get(
+                'weathers',
+                this.state.weather,
+              ).sourceIndex ?? 0,
+            ),
+          zoneEncounters: () =>
+            !!this.zone.encounters,
+          tileRate: () =>
+            this.tileHasEncounterRate(),
+          playSe: () =>
+            this.sound.audio.playSe(
+              tables.sweetScent.sound,
+            ),
+        },
+        snapshot.sweet.slot,
+      );
+    }
+
+    this.healMachine = null;
+    if (snapshot.healMachine) {
+      this.healAnimation(
+        snapshot.healMachine.balls,
+        snapshot.healMachine.machine,
+      );
+    }
+
+    // Constructors above may initialize RNG, presentation state or actors.
+    // Restore authoritative state and actor identities after all construction.
+    Object.assign(this.state, desiredState);
+    this.restoreActorRuntime(snapshot.actors);
+
+    this.sighting =
+      structuredClone(snapshot.sighting);
+    this.approaches =
+      structuredClone(snapshot.approaches);
+    this.obstacleTicks =
+      snapshot.obstacleTicks;
+    this.encounterAttempts.count =
+      snapshot.encounterAttempts;
+    this.wildFoe =
+      structuredClone(snapshot.wildFoe);
+    this.lastTile = snapshot.lastTile;
+    this.area = snapshot.area;
+    this.locked = snapshot.locked;
+    this.lockedObjects = new Set(
+      snapshot.lockedObjects,
+    );
+    this.stepCompleted =
+      snapshot.stepCompleted;
+    this.stepCount = snapshot.stepCount;
+    this.moving = snapshot.moving;
+    this.storyScene =
+      structuredClone(snapshot.storyScene);
+    this.containment = snapshot.containment
+      ? ContainmentUnits.restore(
+          snapshot.containment,
+        )
+      : null;
+    this.warpState =
+      structuredClone(snapshot.warpState);
+    this.fadeAnim =
+      structuredClone(snapshot.fadeAnim);
+    this.fadeAlpha = snapshot.fadeAlpha;
+    this.fadeColor = snapshot.fadeColor;
+    this.loads = snapshot.loads;
+    this.crossings = snapshot.crossings;
+    this.departed =
+      structuredClone(snapshot.departed);
+    this.cameraYHistory = [
+      ...snapshot.cameraYHistory,
+    ];
+    this.cameraCur = [...snapshot.cameraCur];
+    this.cameraPrev = [
+      ...snapshot.cameraPrev,
+    ];
+    this.doors =
+      structuredClone(snapshot.doors);
+    this.cameraOffset = [
+      ...snapshot.cameraOffset,
+    ];
+    this.entrance =
+      structuredClone(snapshot.entrance);
+    this.viewCamera =
+      structuredClone(snapshot.viewCamera);
+    this.lookoutInput =
+      structuredClone(snapshot.lookoutInput);
+    this.boatShip =
+      structuredClone(snapshot.boatShip);
+    this.cameraShake = snapshot.cameraShake;
+    this.heightCalc = snapshot.heightCalc;
+    this.healAvatar = snapshot.healAvatar;
+    this.flashTicks = snapshot.flashTicks;
+    this.featureSprite =
+      snapshot.featureSprite;
+    this.radarTask = snapshot.radarTask;
+    this.honeyCell = snapshot.honeyCell;
+
+    this.fishing?.restoreRuntimeSnapshot(
+      snapshot.fishing!,
+    );
+    if (snapshot.boat) {
+      const boat =
+        this.boat as BoatTrip | null;
+
+      if (!boat) {
+        throw new Error(
+          'Boat task was not reconstructed.',
+        );
+      }
+
+      boat.restoreRuntimeSnapshot(
+        snapshot.boat,
+      );
+    }
+
+    const lookout = this.lookout as
+      | GreatMarshLookout
+      | VistaBinoculars
+      | null;
+
+    if (
+      lookout instanceof GreatMarshLookout &&
+      snapshot.lookout?.kind === 'great-marsh'
+    ) {
+      lookout.restoreRuntimeSnapshot(
+        snapshot.lookout.state,
+      );
+    } else if (
+      lookout instanceof VistaBinoculars &&
+      snapshot.lookout?.kind === 'vista'
+    ) {
+      lookout.restoreRuntimeSnapshot(
+        snapshot.lookout.state,
+      );
+    }
+
+    if (snapshot.seeker) {
+      const seeker =
+        this.seeker as VsSeekerTask | null;
+
+      if (!seeker) {
+        throw new Error(
+          'Vs. Seeker task was not reconstructed.',
+        );
+      }
+
+      seeker.restoreRuntimeSnapshot(
+        snapshot.seeker,
+      );
+    }
+
+    if (snapshot.watering) {
+      const watering =
+        this.watering as WateringTask | null;
+
+      if (!watering) {
+        throw new Error(
+          'Watering task was not reconstructed.',
+        );
+      }
+
+      watering.restoreRuntimeSnapshot(
+        snapshot.watering,
+      );
+    }
+
+    if (snapshot.flyTask) {
+      const flyTask = this.flyTask as {
+        task: FlyTask;
+        slot: number;
+        destination: {
+          zone: Id;
+          x: number;
+          z: number;
+        };
+      } | null;
+
+      if (!flyTask) {
+        throw new Error(
+          'Fly task was not reconstructed.',
+        );
+      }
+
+      flyTask.task.restoreRuntimeSnapshot(
+        snapshot.flyTask.state,
+      );
+    }
+
+    if (snapshot.teleportTask) {
+      const teleportTask =
+        this.teleportTask as TeleportTask | null;
+
+      if (!teleportTask) {
+        throw new Error(
+          'Teleport task was not reconstructed.',
+        );
+      }
+
+      teleportTask.restoreRuntimeSnapshot(
+        snapshot.teleportTask,
+      );
+    }
+
+    this.sweet?.restoreRuntimeSnapshot(
+      snapshot.sweet!,
+    );
+
+    if (snapshot.healMachine) {
+      const healMachine =
+        this.healMachine as HealMachine | null;
+
+      if (!healMachine) {
+        throw new Error(
+          'Healing task was not reconstructed.',
+        );
+      }
+
+      healMachine.restoreRuntimeSnapshot(
+        snapshot.healMachine,
+      );
+    }
+
+    this.shake = snapshot.shake
+      ? ShakeTask.restore(
+          this.resolve(snapshot.shake.actor),
+          snapshot.shake,
+        )
+      : null;
+    this.elevatorRide = snapshot.elevatorRide
+      ? ElevatorRide.restore(
+          snapshot.elevatorRide,
+          this.sound,
+        )
+      : null;
+
+    if (snapshot.platformLift) {
+      if (!this.platformLift) {
+        throw new Error(
+          'Platform-lift snapshot outside a lift map.',
+        );
+      }
+
+      this.platformLift.restoreRuntimeSnapshot(
+        snapshot.platformLift,
+      );
+    } else {
+      this.platformLift = null;
+    }
+
+    this.weatherTasks.restoreRuntimeSnapshot(
+      snapshot.weatherTasks,
+    );
+    this.radar?.restoreRuntimeSnapshot(
+      snapshot.radar!,
+    );
+
+    if (snapshot.honey) {
+      if (!this.honey) {
+        throw new Error(
+          'Honey-tree snapshot without honey-tree data.',
+        );
+      }
+
+      this.honey.shakes.restoreRuntimeSnapshot(
+        snapshot.honey,
+      );
+    }
+
+    if (snapshot.ug) {
+      if (!this.ug) {
+        throw new Error(
+          'Underground snapshot outside the Underground.',
+        );
+      }
+
+      this.ug.restoreRuntimeSnapshot(
+        snapshot.ug,
+      );
+    } else {
+      this.ug = null;
+    }
+
+    if (snapshot.ugKeepIsUg) {
+      this.ugKeep = this.ug;
+    } else if (snapshot.ugKeep) {
+      const kept = this.newUndergroundField(true);
+
+      if (!kept) {
+        throw new Error(
+          'Underground keep snapshot outside the Underground.',
+        );
+      }
+
+      kept.restoreRuntimeSnapshot(
+        snapshot.ugKeep,
+      );
+      this.ugKeep = kept;
+    } else {
+      this.ugKeep = null;
+    }
+
+    this.ugTransit = snapshot.ugTransit
+      ? {
+          phase: snapshot.ugTransit.phase,
+          zone: snapshot.ugTransit.zone,
+          x: snapshot.ugTransit.x,
+          z: snapshot.ugTransit.z,
+          down: snapshot.ugTransit.down,
+          ...(snapshot.ugTransit.base
+            ? {
+                base: {
+                  ...snapshot.ugTransit.base,
+                },
+              }
+            : {}),
+          ...(snapshot.ugTransit.anim
+            ? {
+                anim: this.ugAnim(
+                  snapshot.ugTransit.anim.part,
+                ),
+              }
+            : {}),
+          ...(snapshot.ugTransit.wait !==
+          undefined
+            ? {
+                wait: snapshot.ugTransit.wait,
+              }
+            : {}),
+        }
+      : null;
+
+    if (
+      this.ugTransit?.anim &&
+      snapshot.ugTransit?.anim
+    ) {
+      this.ugTransit.anim
+        .restoreRuntimeSnapshot(
+          snapshot.ugTransit.anim,
+        );
+    }
+
+    const taskShownCutIn = this.shownCutIn;
+
+    this.cutIn = snapshot.cutIn
+      ? HmCutIn.restore(
+          structuredClone(snapshot.cutIn.mon),
+          this.sound.audio,
+          snapshot.cutIn.state,
+        )
+      : null;
+
+    if (snapshot.shownCutInIsCutIn) {
+      this.shownCutIn = this.cutIn;
+    } else if (snapshot.shownCutIn) {
+      if (taskShownCutIn) {
+        taskShownCutIn.restoreRuntimeSnapshot(
+          snapshot.shownCutIn.state,
+        );
+        this.shownCutIn = taskShownCutIn;
+      } else {
+        this.shownCutIn = HmCutIn.restore(
+          structuredClone(
+            snapshot.shownCutIn.mon,
+          ),
+          this.sound.audio,
+          snapshot.shownCutIn.state,
+        );
+      }
+    } else {
+      this.shownCutIn = null;
+    }
+
+    this.grassSeen.clear();
+
+    const actorByKey = (key: string) => {
+      if (key === 'hero') return this.hero;
+      if (key === 'camera') return this.camera;
+      if (key === 'follower') {
+        return this.pet.actor;
+      }
+      if (key.startsWith('actor:')) {
+        const actorKey = Number(
+          key.slice('actor:'.length),
+        );
+
+        return Number.isSafeInteger(actorKey)
+          ? this.actors.get(actorKey) ?? null
+          : null;
+      }
+      return null;
+    };
+
+    for (const key of snapshot.grassSeen) {
+      const motion = actorByKey(key)?.motion;
+
+      if (motion) {
+        this.grassSeen.add(motion);
+      }
+    }
+
+    Object.assign(this.state, desiredState);
+  }
+
   captureActorRuntime(): {
     hero: ActorSnapshot;
     actors: { key: number; state: ActorSnapshot }[];
@@ -423,6 +1199,9 @@ export class FieldWorld implements OpenSinnohWorld {
     cameraTracks: boolean;
     avatar: AvatarRuntimeSnapshot;
     effects: EffectsRuntimeSnapshot;
+    follower: ReturnType<
+      PartyFollower['captureRuntimeSnapshot']
+    >;
     feature: unknown | null;
   } {
     if (this.feature && (!this.feature.captureRuntimeSnapshot || !this.feature.validateRuntimeSnapshot || !this.feature.restoreRuntimeSnapshot)) {
@@ -444,6 +1223,8 @@ export class FieldWorld implements OpenSinnohWorld {
         for (const [key, candidate] of this.actors) if (candidate === actor) return String(key);
         return null;
       }),
+      follower:
+        this.pet.captureRuntimeSnapshot(),
       feature: this.feature ? this.feature.captureRuntimeSnapshot!() : null,
     };
   }
@@ -461,6 +1242,7 @@ export class FieldWorld implements OpenSinnohWorld {
       cameraTracks?: unknown;
       avatar?: unknown;
       effects?: unknown;
+      follower?: unknown;
       feature?: unknown;
     };
     if (!validateActorSnapshot(data.hero) || !Array.isArray(data.actors) || !validateAvatarRuntimeSnapshot(data.avatar) || !data.effects ||
@@ -493,6 +1275,15 @@ export class FieldWorld implements OpenSinnohWorld {
       }
       return null;
     };
+    const followerError =
+      this.pet.validateRuntimeSnapshot(
+        data.follower,
+      );
+    if (followerError) {
+      throw new Error(
+        `Invalid party follower snapshot: ${followerError}`,
+      );
+    }
     const effectsError = this.effects.validateRuntimeSnapshot(data.effects, occupantByKey);
     if (effectsError) throw new Error(`Invalid world field effects snapshot: ${effectsError}`);
     if ((this.feature === null) !== (data.feature === null)) {
@@ -515,6 +1306,9 @@ export class FieldWorld implements OpenSinnohWorld {
     for (const [key, actor] of this.actors) restoreActorSnapshot(actor, entries.get(key)!);
     if (this.camera && data.camera) restoreActorSnapshot(this.camera, data.camera);
     this.cameraTracks = data.cameraTracks;
+    this.pet.restoreRuntimeSnapshot(
+      data.follower,
+    );
     this.effects.restoreRuntimeSnapshot(data.effects, occupantByKey);
     if (this.feature && data.feature !== null) this.feature.restoreRuntimeSnapshot!(data.feature);
     this.syncState();
@@ -918,6 +1712,7 @@ export class FieldWorld implements OpenSinnohWorld {
     this.area = this.zone.area;
     this.events = structuredClone(this.zone.events) as ZoneEvents;
     this.actors.clear();
+    this.grassSeen.clear();
     this.departed = null;
     this.lockedObjects.clear();
     this.sighting = [];
@@ -980,7 +1775,9 @@ export class FieldWorld implements OpenSinnohWorld {
     }
     this.syncState();
     // FieldTask_ChangeMapByLocation (the binoculars' temporary map changes) plays no map BGM.
-    if (!this.lookout) this.mapLoaded?.(zoneId, this.loads);
+    if (!this.lookout && !this.restoringRuntime) {
+      this.mapLoaded?.(zoneId, this.loads);
+    }
   }
 
   /**
@@ -2946,7 +3743,11 @@ export class FieldWorld implements OpenSinnohWorld {
         onFlyOrTeleport(this.reg, this.state);
       },
     };
-    this.flyTask = { task: new FlyTask(host), slot };
+    this.flyTask = {
+      task: new FlyTask(host),
+      slot,
+      destination: { ...dest },
+    };
   }
 
   flyDone(): boolean {
@@ -3421,7 +4222,14 @@ export class FieldWorld implements OpenSinnohWorld {
       moving: () => !!this.hero.motion,
       matrix: () => ({ width: this.matrix.width, height: this.matrix.height }),
       groundY: (x, z) => this.heightAt(tileCentre(x), tileCentre(z), this.hero.y),
-      baseMove: (x, z, facing, then) => this.startUgTransit(this.zone.id, x, z, false, { facing, then }),
+      baseMove: (x, z, facing, continuation) =>
+        this.startUgTransit(
+          this.zone.id,
+          x,
+          z,
+          false,
+          { facing, continuation },
+        ),
       trainerScore: (event) => this.addTrainerScore(event),
       stub: (key, detail) => this.log.stub(key, detail),
       sparkle: (x, z) => void this.effects.add(SPARKLE_RENDERER, 'sparkle', [tileCentre(x), this.heightAt(tileCentre(x), tileCentre(z), this.hero.y), tileCentre(z)]),
@@ -3484,7 +4292,10 @@ export class FieldWorld implements OpenSinnohWorld {
    * fade out, then the BGM fades while the player rises and the screen fades to white, the map changes, the player jumps
    * out of the hole (underground_map_transition.c). The secret base's move fades out and in only.
    */
-  private startUgTransit(zone: Id, x: number, z: number, down: boolean, base?: { facing: Facing; then: () => void }): void {
+  private startUgTransit(zone: Id, x: number, z: number, down: boolean, base?: {
+    facing: Facing;
+    continuation: UndergroundBaseMoveContinuation;
+  }): void {
     if (this.warpState || this.ugTransit) throw new Error('world: a map change is already under way');
     this.get('zones', zone);
     this.hero.motion = null;
@@ -3519,7 +4330,9 @@ export class FieldWorld implements OpenSinnohWorld {
       if (this.fadeAnim) return;
       if (t.phase === 'in') {
         this.ugTransit = null;
-        t.base.then();
+        this.ug?.baseMoveDone(
+          t.base.continuation,
+        );
         return;
       }
       this.ugKeep = this.ug;
