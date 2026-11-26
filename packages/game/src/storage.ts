@@ -67,8 +67,13 @@ export class IndexedDbSaveStore {
 
   /** Writes the slot in one transaction: a failure (a full disk included) leaves the old save as it was. */
   async put(slot: string, save: SaveEnvelope): Promise<void> {
+    await this.putJson(slot, saveToJson(save));
+  }
+
+  /** Writes pre-serialized JSON atomically. Use a separate database for other save formats. */
+  async putJson(slot: string, json: string): Promise<void> {
     try {
-      await this.run('readwrite', (s) => s.put(saveToJson(save), slot));
+      await this.run('readwrite', (s) => s.put(json, slot));
     } catch (e) {
       // Safari aborts a write on a full device with no QuotaExceededError: a bare abort, or an AbortError.
       const refused = e instanceof TransactionAbortedError || (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'AbortError'));
