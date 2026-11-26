@@ -397,55 +397,36 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     fullscreen: fullscreen && { toggle: () => void fullscreen.run().catch((e: Error) => ui!.notice(S.game.fullscreenFailed(e.message))), active: fullscreen.active },
     replay: opts.replay,
   });
-  const runtimeCompatibility = {
-    build: [
-      CONTRACTS_VERSION,
-      ...session.game.loadOrder.map(
-        (pack) => `${pack.id}@${pack.version}`,
-      ),
-    ].join('|'),
-    contracts: CONTRACTS_VERSION,
-  };
-  const runtimeCoordinator =
-    new RuntimeSnapshotCoordinator({
-      compatibility: runtimeCompatibility,
+  // Starting or continuing a game replaces the world and script runner. Bind the
+  // participants to the current game for each shortcut.
+  const runtimeCoordinator = () => {
+    const { game } = session;
+    return new RuntimeSnapshotCoordinator({
+      compatibility: {
+        build: [CONTRACTS_VERSION, ...game.loadOrder.map((pack) => `${pack.id}@${pack.version}`)].join('|'),
+        contracts: CONTRACTS_VERSION,
+      },
       boundary: {
         atTickBoundary: (operation) => {
-          if (runtimeTicking) {
-            throw new Error(
-              'Runtime state is between tick boundaries.',
-            );
-          }
-
-          return operation(
-            session.game.state.tick,
-          );
+          if (runtimeTicking) throw new Error('Runtime state is between tick boundaries.');
+          return operation(game.state.tick);
         },
       },
       participants: [
-        gameSnapshotParticipant(session.game),
-        worldSnapshotParticipant(
-          session.game.world,
-        ),
-        scriptRunnerSnapshotParticipant(
-          session.game.scripts as Runner,
-        ),
+        gameSnapshotParticipant(game),
+        worldSnapshotParticipant(game.world),
+        scriptRunnerSnapshotParticipant(game.scripts as Runner),
         ownedSnapshotParticipant('apps'),
         ownedSnapshotParticipant('battle'),
-        audioSnapshotParticipant(session.game),
+        audioSnapshotParticipant(game),
         ownedSnapshotParticipant('render'),
       ],
       references: () => ({
-        actors: [
-          ...new Set(
-            session.game.state.objects
-              .map((actor) => actor.localId)
-              .filter((id) => id >= 0),
-          ),
-        ],
+        actors: [...new Set(game.state.objects.map((actor) => actor.localId).filter((id) => id >= 0))],
         threads: [],
       }),
     });
+  };
   const runtimeSlots:
     (RuntimeSnapshot | null)[] =
       Array<RuntimeSnapshot | null>(10)
@@ -499,7 +480,7 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
 
         try {
           runtimeSlots[slot] =
-            runtimeCoordinator.capture();
+            runtimeCoordinator().capture();
           ui!.toast(
             `Saved runtime state ${slot}`,
           );
@@ -533,7 +514,7 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
 
       try {
         ticks =
-          runtimeCoordinator.restore(snapshot);
+          runtimeCoordinator().restore(snapshot);
         input.clear('keyboard');
         lastInput = null;
         redraw = true;

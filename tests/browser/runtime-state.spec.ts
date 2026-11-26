@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import { skipSetup } from './intro.ts';
+import { saveGame } from './save.ts';
 
 const player = (page: Page) =>
   page.evaluate(() => ({
@@ -11,45 +13,15 @@ const player = (page: Page) =>
     zone: window.openSinnohApp!.game.world.view().zone,
   }));
 
-const shortcut = (
-  page: Page,
-  type: 'save' | 'load',
-  slot: number,
-) =>
-  page.evaluate(
-    ({ type, slot }) => {
-      const digit = new KeyboardEvent('keydown', {
-        key: String(slot),
-        code: `Digit${slot}`,
-        altKey: type === 'save',
-        bubbles: true,
-        cancelable: true,
-      });
-
-      if (type === 'save') {
-        window.dispatchEvent(digit);
-        return;
-      }
-
-      window.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'PageUp',
-          code: 'PageUp',
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      window.dispatchEvent(digit);
-      window.dispatchEvent(
-        new KeyboardEvent('keyup', {
-          key: 'PageUp',
-          code: 'PageUp',
-          bubbles: true,
-        }),
-      );
-    },
-    { type, slot },
-  );
+async function loadSlot(page: Page, slot: number) {
+  await page.keyboard.down('PageUp');
+  try {
+    await page.keyboard.press(`Digit${slot}`);
+  } finally {
+    await page.keyboard.up('PageUp');
+  }
+  await expect(page.locator('.ui-toast')).toContainText(`Loaded runtime state ${slot}`);
+}
 
 test(
   'runtime slot restores world state and the visible field',
@@ -75,48 +47,36 @@ test(
         !window.openSinnohApp!.game.scripts.running(),
     );
 
-    const saved = await player(page);
-    await shortcut(page, 'save', 1);
-    await expect(page.locator('.ui-toast')).toContainText(
-      'Saved runtime state 1',
-    );
+    await saveGame(page);
+    await skipSetup(page);
+    await page.goto('/?packs=fixture&title&continue');
+    await page.waitForFunction(() => window.openSinnohApp && !document.querySelector('.at-title'));
+    await page.waitForFunction(() => window.openSinnohApp?.game.canSave());
+
+    const room = await player(page);
+    await page.keyboard.press('Alt+Digit0');
+    await expect(page.locator('.ui-toast')).toContainText('Saved runtime state 0');
+
+    await page.evaluate(() => window.openSinnohApp!.game.world.warp('fixture:TOWN', 10, 14, 'down'));
+    await page.waitForFunction(() => {
+      const game = window.openSinnohApp!.game;
+      return game.state.player.zone === 'fixture:TOWN' && game.canSave();
+    });
+    const town = await player(page);
+    await page.keyboard.press('Alt+Digit9');
+    await expect(page.locator('.ui-toast')).toContainText('Saved runtime state 9');
 
     const canvas = page.locator('#main-canvas');
-    const savedFrame = await canvas.screenshot();
+    await page.waitForFunction(() => !window.openSinnohApp!.sceneLoading());
+    const townFrame = await canvas.screenshot();
 
-    await page.keyboard.down('ArrowRight');
-    await expect
-      .poll(
-        async () => {
-          const now = await player(page);
-          return (
-            now.state.x !== saved.state.x ||
-            now.state.z !== saved.state.z
-          );
-        },
-        { timeout: 10_000 },
-      )
-      .toBe(true);
-    await page.keyboard.up('ArrowRight');
+    await loadSlot(page, 0);
+    await expect.poll(() => player(page)).toEqual(room);
+    await page.waitForFunction(() => !window.openSinnohApp!.sceneLoading());
+    const roomFrame = await canvas.screenshot();
+    expect(roomFrame.equals(townFrame), 'the canvas must show the restored map').toBe(false);
 
-    const moved = await player(page);
-    expect(moved).not.toEqual(saved);
-
-    const movedFrame = await canvas.screenshot();
-    expect(movedFrame.equals(savedFrame)).toBe(false);
-
-    await shortcut(page, 'load', 1);
-    await expect(page.locator('.ui-toast')).toContainText(
-      'Loaded runtime state 1',
-      { timeout: 20_000 },
-    );
-
-    await expect.poll(() => player(page)).toEqual(saved);
-
-    const restoredFrame = await canvas.screenshot();
-    expect(
-      restoredFrame.equals(movedFrame),
-      'the canvas must visibly leave the moved position',
-    ).toBe(false);
+    await loadSlot(page, 9);
+    await expect.poll(() => player(page)).toEqual(town);
   },
 );
