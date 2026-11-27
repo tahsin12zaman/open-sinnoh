@@ -428,7 +428,7 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     });
   };
   const runtimeSlots = new IndexedDbSaveStore('opensinnoh-runtime-states');
-  let pageUpHeld = false;
+  const runtimeSlotKeys = new Set<string>();
   const runtimeSlot = (
     code: string,
   ): number | null => {
@@ -445,6 +445,7 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
         titleActive ||
         event.ctrlKey ||
         event.metaKey ||
+        event.altKey ||
         event.repeat ||
         event.isComposing
       ) {
@@ -460,20 +461,21 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
         return;
       }
 
-      if (event.code === 'PageUp') {
-        pageUpHeld = true;
-        event.preventDefault();
+      if (event.code === 'KeyQ' || event.code === 'KeyR') {
+        runtimeSlotKeys.add(event.code);
         return;
       }
 
       const slot = runtimeSlot(event.code);
 
-      if (slot === null) {
+      const saveHeld = runtimeSlotKeys.has('KeyQ');
+      const loadHeld = runtimeSlotKeys.has('KeyR');
+      if (slot === null || saveHeld === loadHeld) {
         return;
       }
 
       const key = String(slot);
-      if (event.altKey) {
+      if (saveHeld) {
         event.preventDefault();
 
         try {
@@ -489,8 +491,6 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
 
         return;
       }
-
-      if (!pageUpHeld) return;
 
       event.preventDefault();
       const activeSession = session;
@@ -531,13 +531,11 @@ export async function mountGame(source: PackSource, opts: GameOptions): Promise<
     });
 
     addEventListener('keyup', (event) => {
-      if (event.code === 'PageUp') {
-        pageUpHeld = false;
-      }
+      runtimeSlotKeys.delete(event.code);
     });
 
     addEventListener('blur', () => {
-      pageUpHeld = false;
+      runtimeSlotKeys.clear();
     });
   }
 

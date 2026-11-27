@@ -13,14 +13,15 @@ const player = (page: Page) =>
     zone: window.openSinnohApp!.game.world.view().zone,
   }));
 
-async function loadSlot(page: Page, slot: number) {
-  await page.keyboard.down('PageUp');
+async function pressSlot(page: Page, key: 'KeyQ' | 'KeyR', slot: number) {
+  await page.keyboard.down(key);
   try {
     await page.keyboard.press(`Digit${slot}`);
   } finally {
-    await page.keyboard.up('PageUp');
+    await page.keyboard.up(key);
   }
-  await expect(page.locator('.ui-toast')).toContainText(`Loaded runtime state ${slot}`);
+  const action = key === 'KeyQ' ? 'Saved' : 'Loaded';
+  await expect(page.locator('.ui-toast')).toContainText(`${action} runtime state ${slot}`);
 }
 
 test(
@@ -54,8 +55,7 @@ test(
     await page.waitForFunction(() => window.openSinnohApp?.game.canSave());
 
     const room = await player(page);
-    await page.keyboard.press('Alt+Digit0');
-    await expect(page.locator('.ui-toast')).toContainText('Saved runtime state 0');
+    await pressSlot(page, 'KeyQ', 0);
 
     await page.evaluate(() => window.openSinnohApp!.game.world.warp('fixture:TOWN', 10, 14, 'down'));
     await page.waitForFunction(() => {
@@ -63,8 +63,7 @@ test(
       return game.state.player.zone === 'fixture:TOWN' && game.canSave();
     });
     const town = await player(page);
-    await page.keyboard.press('Alt+Digit9');
-    await expect(page.locator('.ui-toast')).toContainText('Saved runtime state 9');
+    await pressSlot(page, 'KeyQ', 9);
 
     // Continue still starts from the ordinary save, independently of the numbered slots.
     await page.evaluate(() => localStorage.setItem('lantern-nds:suspend', 'off'));
@@ -72,13 +71,13 @@ test(
     await page.waitForFunction(() => window.openSinnohApp && !document.querySelector('.at-title'));
     await expect.poll(() => player(page)).toEqual(room);
 
-    await loadSlot(page, 9);
+    await pressSlot(page, 'KeyR', 9);
     await expect.poll(() => player(page)).toEqual(town);
     const canvas = page.locator('#main-canvas');
     await page.waitForFunction(() => !window.openSinnohApp!.sceneLoading());
     const townFrame = await canvas.screenshot();
 
-    await loadSlot(page, 0);
+    await pressSlot(page, 'KeyR', 0);
     await expect.poll(() => player(page)).toEqual(room);
     await page.waitForFunction(() => !window.openSinnohApp!.sceneLoading());
     const roomFrame = await canvas.screenshot();
